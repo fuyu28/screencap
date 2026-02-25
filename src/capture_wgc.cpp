@@ -19,14 +19,12 @@ namespace {
 
 using Microsoft::WRL::ComPtr;
 
-using namespace winrt;
-using namespace Windows::Foundation;
-using namespace Windows::Graphics;
-using namespace Windows::Graphics::Capture;
-using namespace Windows::Graphics::DirectX;
-using namespace Windows::Graphics::DirectX::Direct3D11;
+namespace wgc = winrt::Windows::Graphics::Capture;
+namespace wgd = winrt::Windows::Graphics::DirectX;
+namespace wgd11 = winrt::Windows::Graphics::DirectX::Direct3D11;
 
-IDirect3DDevice CreateWinRtD3DDevice(ID3D11Device *d3d_device, ErrorInfo *err) {
+wgd11::IDirect3DDevice CreateWinRtD3DDevice(ID3D11Device *d3d_device,
+                                            ErrorInfo *err) {
   ComPtr<IDXGIDevice> dxgi_device;
   HRESULT hr = d3d_device->QueryInterface(IID_PPV_ARGS(&dxgi_device));
   if (FAILED(hr)) {
@@ -46,16 +44,18 @@ IDirect3DDevice CreateWinRtD3DDevice(ID3D11Device *d3d_device, ErrorInfo *err) {
     return nullptr;
   }
 
-  return inspectable.as<IDirect3DDevice>();
+  return inspectable.as<wgd11::IDirect3DDevice>();
 }
 
-bool CreateCaptureItemFromHwnd(HWND hwnd, GraphicsCaptureItem *item,
+bool CreateCaptureItemFromHwnd(HWND hwnd, wgc::GraphicsCaptureItem *item,
                                ErrorInfo *err) {
-  auto interop = get_activation_factory<GraphicsCaptureItem,
-                                        IGraphicsCaptureItemInterop>();
-  com_ptr<ABI::Windows::Graphics::Capture::IGraphicsCaptureItem> abi_item;
+  auto interop = winrt::get_activation_factory<wgc::GraphicsCaptureItem,
+                                               IGraphicsCaptureItemInterop>();
+  winrt::com_ptr<ABI::Windows::Graphics::Capture::IGraphicsCaptureItem>
+      abi_item;
   HRESULT hr = interop->CreateForWindow(
-      hwnd, guid_of<ABI::Windows::Graphics::Capture::IGraphicsCaptureItem>(),
+      hwnd,
+      winrt::guid_of<ABI::Windows::Graphics::Capture::IGraphicsCaptureItem>(),
       abi_item.put_void());
   if (FAILED(hr)) {
     *err = ErrorInfo{"CreateForWindow failed", "CreateCaptureItemFromHwnd",
@@ -63,17 +63,19 @@ bool CreateCaptureItemFromHwnd(HWND hwnd, GraphicsCaptureItem *item,
     return false;
   }
 
-  *item = abi_item.as<GraphicsCaptureItem>();
+  *item = abi_item.as<wgc::GraphicsCaptureItem>();
   return true;
 }
 
-bool CreateCaptureItemFromMonitor(HMONITOR hmon, GraphicsCaptureItem *item,
+bool CreateCaptureItemFromMonitor(HMONITOR hmon, wgc::GraphicsCaptureItem *item,
                                   ErrorInfo *err) {
-  auto interop = get_activation_factory<GraphicsCaptureItem,
-                                        IGraphicsCaptureItemInterop>();
-  com_ptr<ABI::Windows::Graphics::Capture::IGraphicsCaptureItem> abi_item;
+  auto interop = winrt::get_activation_factory<wgc::GraphicsCaptureItem,
+                                               IGraphicsCaptureItemInterop>();
+  winrt::com_ptr<ABI::Windows::Graphics::Capture::IGraphicsCaptureItem>
+      abi_item;
   HRESULT hr = interop->CreateForMonitor(
-      hmon, guid_of<ABI::Windows::Graphics::Capture::IGraphicsCaptureItem>(),
+      hmon,
+      winrt::guid_of<ABI::Windows::Graphics::Capture::IGraphicsCaptureItem>(),
       abi_item.put_void());
   if (FAILED(hr)) {
     *err = ErrorInfo{"CreateForMonitor failed", "CreateCaptureItemFromMonitor",
@@ -81,11 +83,12 @@ bool CreateCaptureItemFromMonitor(HMONITOR hmon, GraphicsCaptureItem *item,
     return false;
   }
 
-  *item = abi_item.as<GraphicsCaptureItem>();
+  *item = abi_item.as<wgc::GraphicsCaptureItem>();
   return true;
 }
 
-bool CopyFrameToImage(const Direct3D11CaptureFrame &frame, ID3D11Device *device,
+bool CopyFrameToImage(const wgc::Direct3D11CaptureFrame &frame,
+                      ID3D11Device *device,
                       ID3D11DeviceContext *context, const Rect &origin_rect,
                       ImageBuffer *out, ErrorInfo *err) {
   auto surface = frame.Surface();
@@ -146,9 +149,9 @@ bool CopyFrameToImage(const Direct3D11CaptureFrame &frame, ID3D11Device *device,
 
 bool CaptureWithWgc(const CaptureContext &ctx, ImageBuffer *out,
                     ErrorInfo *err) {
-  winrt::init_apartment(apartment_type::multi_threaded);
+  winrt::init_apartment(winrt::apartment_type::multi_threaded);
 
-  if (!GraphicsCaptureSession::IsSupported()) {
+  if (!wgc::GraphicsCaptureSession::IsSupported()) {
     *err = ErrorInfo{"GraphicsCaptureSession::IsSupported false",
                      "CaptureWithWgc", std::nullopt, std::nullopt};
     return false;
@@ -171,7 +174,7 @@ bool CaptureWithWgc(const CaptureContext &ctx, ImageBuffer *out,
     return false;
   }
 
-  GraphicsCaptureItem item{nullptr};
+  wgc::GraphicsCaptureItem item{nullptr};
   if (ctx.method == "wgc-window") {
     if (!ctx.window.has_value()) {
       *err = ErrorInfo{"wgc-window needs window target", "CaptureWithWgc",
@@ -197,8 +200,8 @@ bool CaptureWithWgc(const CaptureContext &ctx, ImageBuffer *out,
   }
 
   auto size = item.Size();
-  auto frame_pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
-      winrt_device, DirectXPixelFormat::B8G8R8A8UIntNormalized, 1, size);
+  auto frame_pool = wgc::Direct3D11CaptureFramePool::CreateFreeThreaded(
+      winrt_device, wgd::DirectXPixelFormat::B8G8R8A8UIntNormalized, 1, size);
   auto session = frame_pool.CreateCaptureSession(item);
 
   HANDLE ev = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -208,9 +211,9 @@ bool CaptureWithWgc(const CaptureContext &ctx, ImageBuffer *out,
     return false;
   }
 
-  Direct3D11CaptureFrame captured{nullptr};
+  wgc::Direct3D11CaptureFrame captured{nullptr};
   auto revoker =
-      frame_pool.FrameArrived(auto_revoke, [&](auto &sender, auto &) {
+      frame_pool.FrameArrived(winrt::auto_revoke, [&](auto &sender, auto &) {
         captured = sender.TryGetNextFrame();
         SetEvent(ev);
       });

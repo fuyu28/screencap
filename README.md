@@ -108,7 +108,7 @@ screencap cap --method <method> --target <window|screen> --out <path> [オプシ
 - ホットキー
   - `--hotkey <combo>` 例: `ctrl+shift+s`, `alt+f9`
   - `--hotkey-foreground`  
-    ホットキー押下時点の最前面ウィンドウを対象にする（`--target window` 必須）
+    互換オプション（現在の `ms-screenclip` 経路では未使用）
 
 ## 実用例
 
@@ -136,14 +136,14 @@ screencap cap --method dxgi-window --target window --pid 15796 --crop client --o
 screencap cap --method gdi-bitblt-screen --target screen --monitor primary --crop manual --crop-rect 100 100 800 600 --out crop.png --json
 ```
 
-### 5. ホットキーで前面ウィンドウを 1 回キャプチャ
+### 5. ホットキーで Snipping Tool を起動して保存
 
 ```powershell
-screencap cap --method dxgi-window --target window --hotkey ctrl+shift+s --hotkey-foreground --out hotkey.png --overwrite --json
+screencap cap --method dxgi-window --target window --hotkey ctrl+shift+s --out hotkey.png --overwrite --json
 ```
 
-起動後は待機状態になり、ホットキー押下で 1 回だけ撮影して終了します。  
-`--method dxgi-window` なら、フルスクリーン表示のウィンドウでも同じ経路で扱えます。
+起動後は待機状態になり、ホットキー押下で `ms-screenclip:` を起動します。  
+Snipping Tool で範囲選択すると、クリップボード画像を取得して PNG 保存して終了します。
 
 ## エラー時の確認ポイント
 

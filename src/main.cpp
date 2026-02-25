@@ -7,8 +7,10 @@
 #include "monitor_enum.h"
 #include "window_enum.h"
 
+#include <shellapi.h>
 #include <shellscalingapi.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <sstream>
@@ -458,6 +460,211 @@ std::string BuildFailureJson(const std::string &command,
   return oss.str();
 }
 
+bool LoadClipboardDibToImage(ImageBuffer *out, ErrorInfo *err) {
+  const UINT format =
+      IsClipboardFormatAvailable(CF_DIBV5)
+          ? CF_DIBV5
+          : (IsClipboardFormatAvailable(CF_DIB) ? CF_DIB : 0);
+  if (format == 0) {
+    *err = ErrorInfo{"DIB format not found in clipboard", "LoadClipboardDibToImage",
+                     std::nullopt, std::nullopt};
+    return false;
+  }
+
+  HANDLE h = GetClipboardData(format);
+  if (!h) {
+    *err = ErrorInfo{"GetClipboardData(DIB) failed", "LoadClipboardDibToImage",
+                     std::nullopt, static_cast<uint32_t>(GetLastError())};
+    return false;
+  }
+
+  const SIZE_T total = GlobalSize(h);
+  if (total < sizeof(BITMAPINFOHEADER)) {
+    *err = ErrorInfo{"clipboard DIB payload too small", "LoadClipboardDibToImage",
+                     std::nullopt, std::nullopt};
+    return false;
+  }
+
+  const auto *ptr = static_cast<const uint8_t *>(GlobalLock(h));
+  if (!ptr) {
+    *err = ErrorInfo{"GlobalLock failed", "LoadClipboardDibToImage",
+                     std::nullopt, static_cast<uint32_t>(GetLastError())};
+    return false;
+  }
+
+  const auto *bih = reinterpret_cast<const BITMAPINFOHEADER *>(ptr);
+  if (bih->biSize < sizeof(BITMAPINFOHEADER)) {
+    GlobalUnlock(h);
+    *err = ErrorInfo{"invalid BITMAPINFOHEADER size", "LoadClipboardDibToImage",
+                     std::nullopt, std::nullopt};
+    return false;
+  }
+  if (bih->biBitCount != 32) {
+    GlobalUnlock(h);
+    *err = ErrorInfo{"clipboard DIB bitcount not 32", "LoadClipboardDibToImage",
+                     std::nullopt, std::nullopt};
+    return false;
+  }
+  if (bih->biCompression != BI_RGB && bih->biCompression != BI_BITFIELDS) {
+    GlobalUnlock(h);
+    *err = ErrorInfo{"unsupported DIB compression", "LoadClipboardDibToImage",
+                     std::nullopt, std::nullopt};
+    return false;
+  }
+
+  const int width = bih->biWidth;
+  const int height = (bih->biHeight < 0) ? -bih->biHeight : bih->biHeight;
+  if (width <= 0 || height <= 0) {
+    GlobalUnlock(h);
+    *err = ErrorInfo{"invalid DIB dimensions", "LoadClipboardDibToImage",
+                     std::nullopt, std::nullopt};
+    return false;
+  }
+
+  const bool top_down = bih->biHeight < 0;
+  SIZE_T header_bytes = bih->biSize;
+  if (bih->biCompression == BI_BITFIELDS) {
+    header_bytes += 12;
+  }
+  const SIZE_T src_pitch = static_cast<SIZE_T>(width) * 4;
+  const SIZE_T pixel_bytes = src_pitch * static_cast<SIZE_T>(height);
+  if (header_bytes + pixel_bytes > total) {
+    GlobalUnlock(h);
+    *err = ErrorInfo{"DIB payload truncated", "LoadClipboardDibToImage",
+                     std::nullopt, std::nullopt};
+    return false;
+  }
+
+  const uint8_t *src_base = ptr + header_bytes;
+  out->width = width;
+  out->height = height;
+  out->row_pitch = width * 4;
+  out->origin_x = 0;
+  out->origin_y = 0;
+  out->bgra.resize(static_cast<size_t>(out->row_pitch * out->height));
+
+  for (int y = 0; y < height; ++y) {
+    const int src_y = top_down ? y : (height - 1 - y);
+    const uint8_t *src = src_base + static_cast<SIZE_T>(src_y) * src_pitch;
+    uint8_t *dst =
+        out->bgra.data() + static_cast<size_t>(y * out->row_pitch);
+    memcpy(dst, src, static_cast<size_t>(out->row_pitch));
+  }
+
+  GlobalUnlock(h);
+  return true;
+}
+
+bool WaitClipboardImageAfterSequence(DWORD seq, int timeout_ms,
+                                     ImageBuffer *out, ErrorInfo *err) {
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(timeout_ms);
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (GetClipboardSequenceNumber() <= seq) {
+      Sleep(40);
+      continue;
+    }
+
+    for (int i = 0; i < 20; ++i) {
+      if (OpenClipboard(nullptr)) {
+        ErrorInfo e;
+        const bool ok = LoadClipboardDibToImage(out, &e);
+        CloseClipboard();
+        if (ok) {
+          return true;
+        }
+        if (e.where != "LoadClipboardDibToImage" ||
+            e.message != "DIB format not found in clipboard") {
+          *err = e;
+          return false;
+        }
+      }
+      Sleep(20);
+    }
+  }
+
+  *err = ErrorInfo{"clipboard image timeout", "WaitClipboardImageAfterSequence",
+                   std::nullopt, std::nullopt};
+  return false;
+}
+
+RunResult RunCapByScreenClip(const ParsedArgs &parsed, Logger *logger,
+                             const std::string &dpi_applied) {
+  RunResult rr;
+  const auto start = std::chrono::steady_clock::now();
+
+  const DWORD seq = GetClipboardSequenceNumber();
+  HINSTANCE si = ShellExecuteW(nullptr, L"open", L"ms-screenclip:", nullptr,
+                               nullptr, SW_SHOWNORMAL);
+  if (reinterpret_cast<intptr_t>(si) <= 32) {
+    rr.err = ErrorInfo{"ShellExecute ms-screenclip failed", "RunCapByScreenClip",
+                       std::nullopt, std::nullopt};
+    rr.exit_code = 1;
+    return rr;
+  }
+  if (logger) {
+    logger->Log(LogLevel::kInfo, "launched ms-screenclip");
+  }
+
+  ImageBuffer img;
+  ErrorInfo clip_err;
+  const int clip_timeout_ms = std::max(parsed.common.timeout_ms, 15000);
+  if (!WaitClipboardImageAfterSequence(seq, clip_timeout_ms, &img, &clip_err)) {
+    rr.err = clip_err;
+    rr.exit_code = 1;
+    return rr;
+  }
+
+  if (parsed.cap.force_alpha_255) {
+    for (size_t i = 3; i < img.bgra.size(); i += 4) {
+      img.bgra[i] = 0xFF;
+    }
+  }
+
+  ImageStats stats = ComputeImageStats(img);
+  if (logger) {
+    logger->Log(LogLevel::kInfo,
+                "screenclip image_stats black_ratio=" +
+                    std::to_string(stats.black_ratio) +
+                    " transparent_ratio=" +
+                    std::to_string(stats.transparent_ratio));
+  }
+
+  ErrorInfo save_err;
+  if (!SavePngWic(img, WideFromUtf8(parsed.cap.out_path),
+                  parsed.common.overwrite, &save_err)) {
+    rr.err = save_err;
+    rr.exit_code = 1;
+    return rr;
+  }
+
+  const auto end = std::chrono::steady_clock::now();
+  const auto duration_ms = static_cast<int>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+          .count());
+
+  CropRect crop_out{img.origin_x, img.origin_y, img.width, img.height};
+  std::ostringstream js;
+  js << "{\"ok\":true,\"command\":\"cap\",\"method\":\""
+     << JsonEscape(parsed.cap.method)
+     << "\",\"target\":\"" << TargetTypeName(parsed.cap.target)
+     << "\",\"out_path\":\"" << JsonEscape(parsed.cap.out_path)
+     << "\",\"format\":\"png\",\"timestamp\":\"" << Iso8601NowLocal()
+     << "\",\"duration_ms\":" << duration_ms << ",\"dpi_mode\":\""
+     << JsonEscape(dpi_applied)
+     << "\",\"window\":null,\"monitor\":null,\"crop\":{\"mode\":\"screenclip\""
+     << ",\"rect\":" << CropRectJson(crop_out)
+     << ",\"pad\":{\"l\":0,\"t\":0,\"r\":0,\"b\":0}}";
+  js << ",\"image_stats\":{\"black_ratio\":" << stats.black_ratio
+     << ",\"transparent_ratio\":" << stats.transparent_ratio
+     << ",\"avg_luma\":" << stats.avg_luma << "},\"error\":null}";
+
+  rr.ok = true;
+  rr.exit_code = 0;
+  rr.json = js.str();
+  return rr;
+}
+
 bool WaitForHotkey(const ParsedArgs &parsed, Logger *logger, ErrorInfo *err) {
   if (!parsed.cap.hotkey_enabled) {
     return true;
@@ -555,11 +762,7 @@ int main(int argc, char **argv) {
         rr.err = wait_err;
         rr.exit_code = 1;
       } else {
-        if (run_args.cap.hotkey_foreground) {
-          run_args.cap.window_query = TargetWindowQuery{};
-          run_args.cap.window_query.foreground = true;
-        }
-        rr = RunCap(run_args, &logger, dpi_applied);
+        rr = RunCapByScreenClip(run_args, &logger, dpi_applied);
       }
     } else {
       rr = RunCap(run_args, &logger, dpi_applied);

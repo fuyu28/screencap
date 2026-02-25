@@ -346,23 +346,25 @@ ParseResult ParseArgs(int argc, char **argv) {
       r.error = "only --format png is supported";
       return r;
     }
-    if (out.cap.target == TargetType::kWindow) {
-      const bool has_window_target =
-          out.cap.window_query.hwnd.has_value() ||
-          out.cap.window_query.pid.has_value() ||
-          out.cap.window_query.foreground ||
-          out.cap.window_query.title.has_value() ||
-          out.cap.window_query.class_name.has_value();
-      if (!has_window_target) {
-        r.error = "window target needs one of "
-                  "--hwnd/--pid/--foreground/--title/--class";
-        return r;
-      }
-    } else {
-      if (!out.cap.screen_query.monitor.has_value() &&
-          !out.cap.screen_query.virtual_screen) {
-        r.error = "screen target needs --monitor or --virtual-screen";
-        return r;
+    if (!out.cap.hotkey_enabled) {
+      if (out.cap.target == TargetType::kWindow) {
+        const bool has_window_target =
+            out.cap.window_query.hwnd.has_value() ||
+            out.cap.window_query.pid.has_value() ||
+            out.cap.window_query.foreground ||
+            out.cap.window_query.title.has_value() ||
+            out.cap.window_query.class_name.has_value();
+        if (!has_window_target) {
+          r.error = "window target needs one of "
+                    "--hwnd/--pid/--foreground/--title/--class";
+          return r;
+        }
+      } else {
+        if (!out.cap.screen_query.monitor.has_value() &&
+            !out.cap.screen_query.virtual_screen) {
+          r.error = "screen target needs --monitor or --virtual-screen";
+          return r;
+        }
       }
     }
     if (out.cap.crop_mode == CropMode::kManual &&
@@ -372,10 +374,6 @@ ParseResult ParseArgs(int argc, char **argv) {
     }
     if (out.cap.hotkey_foreground && !out.cap.hotkey_enabled) {
       r.error = "--hotkey-foreground needs --hotkey";
-      return r;
-    }
-    if (out.cap.hotkey_foreground && out.cap.target != TargetType::kWindow) {
-      r.error = "--hotkey-foreground needs --target window";
       return r;
     }
   }
@@ -429,7 +427,7 @@ std::string BuildHelpText() {
       << "  screencap cap --method dxgi-monitor --target screen --monitor "
          "primary --out a.png\n"
       << "  screencap cap --method dxgi-window --target window --hotkey "
-         "ctrl+shift+s --hotkey-foreground --out a.png\n";
+         "ctrl+shift+s --out a.png\n";
   return oss.str();
 }
 

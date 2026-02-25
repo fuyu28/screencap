@@ -17,6 +17,8 @@ struct MonitorInfo {
 };
 
 std::vector<MonitorInfo> EnumerateMonitors();
-std::optional<MonitorInfo> FindMonitorByToken(const std::vector<MonitorInfo>& monitors, const std::string& token);
+std::optional<MonitorInfo>
+FindMonitorByToken(const std::vector<MonitorInfo> &monitors,
+                   const std::string &token);
 
-}  // namespace sc
+} // namespace sc

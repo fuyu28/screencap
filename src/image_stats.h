@@ -4,6 +4,6 @@
 
 namespace sc {
 
-ImageStats ComputeImageStats(const ImageBuffer& img);
+ImageStats ComputeImageStats(const ImageBuffer &img);
 
-}  // namespace sc
+} // namespace sc

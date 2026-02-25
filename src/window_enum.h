@@ -23,7 +23,8 @@ struct WindowInfo {
 };
 
 std::vector<WindowInfo> EnumerateWindows();
-bool ResolveWindowTarget(const TargetWindowQuery& query, const std::vector<WindowInfo>& all, WindowInfo* out,
-                         std::string* reason, Logger* logger, ErrorInfo* err);
+bool ResolveWindowTarget(const TargetWindowQuery &query,
+                         const std::vector<WindowInfo> &all, WindowInfo *out,
+                         std::string *reason, Logger *logger, ErrorInfo *err);
 
-}  // namespace sc
+} // namespace sc

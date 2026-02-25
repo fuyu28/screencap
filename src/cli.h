@@ -33,7 +33,7 @@ struct TargetWindowQuery {
 };
 
 struct TargetScreenQuery {
-  std::optional<std::string> monitor;  // index or primary
+  std::optional<std::string> monitor; // index or primary
   bool virtual_screen = false;
 };
 
@@ -64,10 +64,10 @@ struct ParseResult {
   std::string error;
 };
 
-ParseResult ParseArgs(int argc, char** argv);
-const char* DpiModeName(DpiMode mode);
-const char* TargetTypeName(TargetType t);
-const char* CropModeName(CropMode m);
+ParseResult ParseArgs(int argc, char **argv);
+const char *DpiModeName(DpiMode mode);
+const char *TargetTypeName(TargetType t);
+const char *CropModeName(CropMode m);
 std::string BuildHelpText();
 
-}  // namespace sc
+} // namespace sc

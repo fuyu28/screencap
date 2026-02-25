@@ -9,10 +9,11 @@ std::vector<MonitorInfo> EnumerateMonitors() {
   EnumDisplayMonitors(
       nullptr, nullptr,
       [](HMONITOR h, HDC, LPRECT, LPARAM lp) -> BOOL {
-        auto* vec = reinterpret_cast<std::vector<MonitorInfo>*>(lp);
+        auto *vec = reinterpret_cast<std::vector<MonitorInfo> *>(lp);
         MONITORINFOEXW mi{};
         mi.cbSize = sizeof(mi);
-        if (!GetMonitorInfoW(h, &mi)) return TRUE;
+        if (!GetMonitorInfoW(h, &mi))
+          return TRUE;
 
         MonitorInfo info;
         info.hmon = h;
@@ -27,10 +28,14 @@ std::vector<MonitorInfo> EnumerateMonitors() {
   return out;
 }
 
-std::optional<MonitorInfo> FindMonitorByToken(const std::vector<MonitorInfo>& monitors, const std::string& token) {
+std::optional<MonitorInfo>
+FindMonitorByToken(const std::vector<MonitorInfo> &monitors,
+                   const std::string &token) {
   if (token == "primary") {
-    auto it = std::find_if(monitors.begin(), monitors.end(), [](const MonitorInfo& m) { return m.primary; });
-    if (it != monitors.end()) return *it;
+    auto it = std::find_if(monitors.begin(), monitors.end(),
+                           [](const MonitorInfo &m) { return m.primary; });
+    if (it != monitors.end())
+      return *it;
     return std::nullopt;
   }
 
@@ -41,9 +46,11 @@ std::optional<MonitorInfo> FindMonitorByToken(const std::vector<MonitorInfo>& mo
     return std::nullopt;
   }
 
-  auto it = std::find_if(monitors.begin(), monitors.end(), [&](const MonitorInfo& m) { return m.index == idx; });
-  if (it != monitors.end()) return *it;
+  auto it = std::find_if(monitors.begin(), monitors.end(),
+                         [&](const MonitorInfo &m) { return m.index == idx; });
+  if (it != monitors.end())
+    return *it;
   return std::nullopt;
 }
 
-}  // namespace sc
+} // namespace sc

@@ -12,22 +12,26 @@ namespace {
 
 using Microsoft::WRL::ComPtr;
 
-bool FindOutputForMonitor(HMONITOR hmon, IDXGIAdapter1** out_adapter, IDXGIOutput1** out_output, int* out_ai, int* out_oi,
-                          ErrorInfo* err) {
+bool FindOutputForMonitor(HMONITOR hmon, IDXGIAdapter1 **out_adapter,
+                          IDXGIOutput1 **out_output, int *out_ai, int *out_oi,
+                          ErrorInfo *err) {
   ComPtr<IDXGIFactory1> factory;
   HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
   if (FAILED(hr)) {
-    *err = ErrorInfo{"CreateDXGIFactory1 failed", "FindOutputForMonitor", static_cast<uint32_t>(hr), std::nullopt};
+    *err = ErrorInfo{"CreateDXGIFactory1 failed", "FindOutputForMonitor",
+                     static_cast<uint32_t>(hr), std::nullopt};
     return false;
   }
 
   for (UINT ai = 0;; ++ai) {
     ComPtr<IDXGIAdapter1> adapter;
-    if (factory->EnumAdapters1(ai, &adapter) == DXGI_ERROR_NOT_FOUND) break;
+    if (factory->EnumAdapters1(ai, &adapter) == DXGI_ERROR_NOT_FOUND)
+      break;
 
     for (UINT oi = 0;; ++oi) {
       ComPtr<IDXGIOutput> output;
-      if (adapter->EnumOutputs(oi, &output) == DXGI_ERROR_NOT_FOUND) break;
+      if (adapter->EnumOutputs(oi, &output) == DXGI_ERROR_NOT_FOUND)
+        break;
 
       DXGI_OUTPUT_DESC desc{};
       output->GetDesc(&desc);
@@ -35,7 +39,9 @@ bool FindOutputForMonitor(HMONITOR hmon, IDXGIAdapter1** out_adapter, IDXGIOutpu
         ComPtr<IDXGIOutput1> o1;
         hr = output.As(&o1);
         if (FAILED(hr)) {
-          *err = ErrorInfo{"QueryInterface IDXGIOutput1 failed", "FindOutputForMonitor", static_cast<uint32_t>(hr), std::nullopt};
+          *err = ErrorInfo{"QueryInterface IDXGIOutput1 failed",
+                           "FindOutputForMonitor", static_cast<uint32_t>(hr),
+                           std::nullopt};
           return false;
         }
         *out_adapter = adapter.Detach();
@@ -47,33 +53,40 @@ bool FindOutputForMonitor(HMONITOR hmon, IDXGIAdapter1** out_adapter, IDXGIOutpu
     }
   }
 
-  *err = ErrorInfo{"monitor output not found", "FindOutputForMonitor", std::nullopt, std::nullopt};
+  *err = ErrorInfo{"monitor output not found", "FindOutputForMonitor",
+                   std::nullopt, std::nullopt};
   return false;
 }
 
-bool AcquireDupFrame(IDXGIOutput1* output1, IDXGIAdapter1* adapter, int timeout_ms, Rect capture_rect, ImageBuffer* out,
-                     ErrorInfo* err) {
+bool AcquireDupFrame(IDXGIOutput1 *output1, IDXGIAdapter1 *adapter,
+                     int timeout_ms, Rect capture_rect, ImageBuffer *out,
+                     ErrorInfo *err) {
   ComPtr<ID3D11Device> device;
   ComPtr<ID3D11DeviceContext> context;
-  HRESULT hr = D3D11CreateDevice(adapter, D3D_DRIVER_TYPE_UNKNOWN, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
+  HRESULT hr = D3D11CreateDevice(adapter, D3D_DRIVER_TYPE_UNKNOWN, nullptr,
+                                 D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
                                  D3D11_SDK_VERSION, &device, nullptr, &context);
   if (FAILED(hr)) {
-    *err = ErrorInfo{"D3D11CreateDevice failed", "AcquireDupFrame", static_cast<uint32_t>(hr), std::nullopt};
+    *err = ErrorInfo{"D3D11CreateDevice failed", "AcquireDupFrame",
+                     static_cast<uint32_t>(hr), std::nullopt};
     return false;
   }
 
   ComPtr<IDXGIOutputDuplication> dup;
   hr = output1->DuplicateOutput(device.Get(), &dup);
   if (FAILED(hr)) {
-    *err = ErrorInfo{"DuplicateOutput failed", "AcquireDupFrame", static_cast<uint32_t>(hr), std::nullopt};
+    *err = ErrorInfo{"DuplicateOutput failed", "AcquireDupFrame",
+                     static_cast<uint32_t>(hr), std::nullopt};
     return false;
   }
 
   DXGI_OUTDUPL_FRAME_INFO frame_info{};
   ComPtr<IDXGIResource> resource;
-  hr = dup->AcquireNextFrame(static_cast<UINT>(timeout_ms), &frame_info, &resource);
+  hr = dup->AcquireNextFrame(static_cast<UINT>(timeout_ms), &frame_info,
+                             &resource);
   if (FAILED(hr)) {
-    *err = ErrorInfo{"AcquireNextFrame failed", "AcquireDupFrame", static_cast<uint32_t>(hr), std::nullopt};
+    *err = ErrorInfo{"AcquireNextFrame failed", "AcquireDupFrame",
+                     static_cast<uint32_t>(hr), std::nullopt};
     return false;
   }
 
@@ -81,7 +94,8 @@ bool AcquireDupFrame(IDXGIOutput1* output1, IDXGIAdapter1* adapter, int timeout_
   hr = resource.As(&tex);
   if (FAILED(hr)) {
     dup->ReleaseFrame();
-    *err = ErrorInfo{"frame resource to texture failed", "AcquireDupFrame", static_cast<uint32_t>(hr), std::nullopt};
+    *err = ErrorInfo{"frame resource to texture failed", "AcquireDupFrame",
+                     static_cast<uint32_t>(hr), std::nullopt};
     return false;
   }
 
@@ -96,7 +110,8 @@ bool AcquireDupFrame(IDXGIOutput1* output1, IDXGIAdapter1* adapter, int timeout_
   hr = device->CreateTexture2D(&desc, nullptr, &staging);
   if (FAILED(hr)) {
     dup->ReleaseFrame();
-    *err = ErrorInfo{"CreateTexture2D staging failed", "AcquireDupFrame", static_cast<uint32_t>(hr), std::nullopt};
+    *err = ErrorInfo{"CreateTexture2D staging failed", "AcquireDupFrame",
+                     static_cast<uint32_t>(hr), std::nullopt};
     return false;
   }
 
@@ -106,7 +121,8 @@ bool AcquireDupFrame(IDXGIOutput1* output1, IDXGIAdapter1* adapter, int timeout_
   hr = context->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &map);
   if (FAILED(hr)) {
     dup->ReleaseFrame();
-    *err = ErrorInfo{"Map staging failed", "AcquireDupFrame", static_cast<uint32_t>(hr), std::nullopt};
+    *err = ErrorInfo{"Map staging failed", "AcquireDupFrame",
+                     static_cast<uint32_t>(hr), std::nullopt};
     return false;
   }
 
@@ -120,8 +136,9 @@ bool AcquireDupFrame(IDXGIOutput1* output1, IDXGIAdapter1* adapter, int timeout_
   out->bgra.resize(static_cast<size_t>(w * h * 4));
 
   for (int y = 0; y < h; ++y) {
-    const uint8_t* src = static_cast<const uint8_t*>(map.pData) + static_cast<size_t>(y * map.RowPitch);
-    uint8_t* dst = out->bgra.data() + static_cast<size_t>(y * out->row_pitch);
+    const uint8_t *src = static_cast<const uint8_t *>(map.pData) +
+                         static_cast<size_t>(y * map.RowPitch);
+    uint8_t *dst = out->bgra.data() + static_cast<size_t>(y * out->row_pitch);
     memcpy(dst, src, static_cast<size_t>(w * 4));
   }
 
@@ -130,10 +147,11 @@ bool AcquireDupFrame(IDXGIOutput1* output1, IDXGIAdapter1* adapter, int timeout_
   return true;
 }
 
-}  // namespace
+} // namespace
 
-bool CaptureWithDxgi(const CaptureContext& ctx, ImageBuffer* out, int* out_adapter_index, int* out_output_index,
-                     ErrorInfo* err) {
+bool CaptureWithDxgi(const CaptureContext &ctx, ImageBuffer *out,
+                     int *out_adapter_index, int *out_output_index,
+                     ErrorInfo *err) {
   HMONITOR hmon = nullptr;
   if (ctx.monitor.has_value()) {
     hmon = ctx.monitor->hmon;
@@ -141,7 +159,8 @@ bool CaptureWithDxgi(const CaptureContext& ctx, ImageBuffer* out, int* out_adapt
     hmon = MonitorFromWindow(ctx.window->hwnd, MONITOR_DEFAULTTONEAREST);
   }
   if (!hmon) {
-    *err = ErrorInfo{"unable to resolve monitor for DXGI", "CaptureWithDxgi", std::nullopt, std::nullopt};
+    *err = ErrorInfo{"unable to resolve monitor for DXGI", "CaptureWithDxgi",
+                     std::nullopt, std::nullopt};
     return false;
   }
 
@@ -156,13 +175,15 @@ bool CaptureWithDxgi(const CaptureContext& ctx, ImageBuffer* out, int* out_adapt
   MONITORINFO mi{};
   mi.cbSize = sizeof(mi);
   if (!GetMonitorInfoW(hmon, &mi)) {
-    *err = ErrorInfo{"GetMonitorInfo failed", "CaptureWithDxgi", std::nullopt, static_cast<uint32_t>(GetLastError())};
+    *err = ErrorInfo{"GetMonitorInfo failed", "CaptureWithDxgi", std::nullopt,
+                     static_cast<uint32_t>(GetLastError())};
     return false;
   }
   Rect monitor_rect = ToRect(mi.rcMonitor);
 
   ImageBuffer full;
-  if (!AcquireDupFrame(output.Get(), adapter.Get(), ctx.common.timeout_ms, monitor_rect, &full, err)) {
+  if (!AcquireDupFrame(output.Get(), adapter.Get(), ctx.common.timeout_ms,
+                       monitor_rect, &full, err)) {
     return false;
   }
 
@@ -178,4 +199,4 @@ bool CaptureWithDxgi(const CaptureContext& ctx, ImageBuffer* out, int* out_adapt
   return true;
 }
 
-}  // namespace sc
+} // namespace sc

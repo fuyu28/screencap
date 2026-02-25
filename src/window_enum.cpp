@@ -37,32 +37,38 @@ Rect GetClientRectScreen(HWND hwnd) {
   return Rect{p1.x, p1.y, p2.x, p2.y};
 }
 
-Rect GetDwmFrameRect(HWND hwnd, const Rect& fallback) {
+Rect GetDwmFrameRect(HWND hwnd, const Rect &fallback) {
   RECT r{};
-  if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r)))) {
+  if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &r,
+                                      sizeof(r)))) {
     return ToRect(r);
   }
   return fallback;
 }
 
-int Area(const Rect& r) { return std::max(0, Width(r)) * std::max(0, Height(r)); }
+int Area(const Rect &r) {
+  return std::max(0, Width(r)) * std::max(0, Height(r));
+}
 
-bool ContainsI(const std::string& hay, const std::string& needle) {
-  if (needle.empty()) return true;
+bool ContainsI(const std::string &hay, const std::string &needle) {
+  if (needle.empty())
+    return true;
   auto lower = [](std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(tolower(c)); });
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+      return static_cast<char>(tolower(c));
+    });
     return s;
   };
   return lower(hay).find(lower(needle)) != std::string::npos;
 }
 
-}  // namespace
+} // namespace
 
 std::vector<WindowInfo> EnumerateWindows() {
   std::vector<WindowInfo> out;
   EnumWindows(
       [](HWND hwnd, LPARAM lparam) -> BOOL {
-        auto* vec = reinterpret_cast<std::vector<WindowInfo>*>(lparam);
+        auto *vec = reinterpret_cast<std::vector<WindowInfo> *>(lparam);
 
         WindowInfo w;
         w.hwnd = hwnd;
@@ -77,7 +83,8 @@ std::vector<WindowInfo> EnumerateWindows() {
         w.visible = IsWindowVisible(hwnd) != FALSE;
         w.iconic = IsIconic(hwnd) != FALSE;
         DWORD cloaked = 0;
-        if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked)))) {
+        if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked,
+                                            sizeof(cloaked)))) {
           w.cloaked = cloaked != 0;
         }
         vec->push_back(std::move(w));
@@ -87,11 +94,13 @@ std::vector<WindowInfo> EnumerateWindows() {
   return out;
 }
 
-bool ResolveWindowTarget(const TargetWindowQuery& query, const std::vector<WindowInfo>& all, WindowInfo* out,
-                         std::string* reason, Logger* logger, ErrorInfo* err) {
+bool ResolveWindowTarget(const TargetWindowQuery &query,
+                         const std::vector<WindowInfo> &all, WindowInfo *out,
+                         std::string *reason, Logger *logger, ErrorInfo *err) {
   if (query.hwnd.has_value()) {
-    HWND hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(query.hwnd.value()));
-    for (const auto& w : all) {
+    HWND hwnd =
+        reinterpret_cast<HWND>(static_cast<uintptr_t>(query.hwnd.value()));
+    for (const auto &w : all) {
       if (w.hwnd == hwnd) {
         *out = w;
         *reason = "matched by --hwnd";
@@ -105,7 +114,7 @@ bool ResolveWindowTarget(const TargetWindowQuery& query, const std::vector<Windo
 
   if (query.foreground) {
     HWND fg = GetForegroundWindow();
-    for (const auto& w : all) {
+    for (const auto &w : all) {
       if (w.hwnd == fg) {
         *out = w;
         *reason = "matched by --foreground";
@@ -117,11 +126,15 @@ bool ResolveWindowTarget(const TargetWindowQuery& query, const std::vector<Windo
     return false;
   }
 
-  std::vector<const WindowInfo*> candidates;
-  for (const auto& w : all) {
-    if (query.pid.has_value() && static_cast<int>(w.pid) != query.pid.value()) continue;
-    if (query.title.has_value() && !ContainsI(w.title, query.title.value())) continue;
-    if (query.class_name.has_value() && w.class_name != query.class_name.value()) continue;
+  std::vector<const WindowInfo *> candidates;
+  for (const auto &w : all) {
+    if (query.pid.has_value() && static_cast<int>(w.pid) != query.pid.value())
+      continue;
+    if (query.title.has_value() && !ContainsI(w.title, query.title.value()))
+      continue;
+    if (query.class_name.has_value() &&
+        w.class_name != query.class_name.value())
+      continue;
     candidates.push_back(&w);
   }
 
@@ -131,21 +144,26 @@ bool ResolveWindowTarget(const TargetWindowQuery& query, const std::vector<Windo
     return false;
   }
 
-  auto rank = [](const WindowInfo* w) {
+  auto rank = [](const WindowInfo *w) {
     int s1 = (w->visible && !w->iconic && !w->cloaked) ? 1 : 0;
     int s2 = (GetAncestor(w->hwnd, GA_ROOT) == w->hwnd) ? 1 : 0;
     int s3 = Area(w->rect);
     return std::tuple<int, int, int>(s1, s2, s3);
   };
 
-  std::sort(candidates.begin(), candidates.end(), [&](const WindowInfo* a, const WindowInfo* b) { return rank(a) > rank(b); });
+  std::sort(candidates.begin(), candidates.end(),
+            [&](const WindowInfo *a, const WindowInfo *b) {
+              return rank(a) > rank(b);
+            });
 
   *out = *candidates.front();
-  *reason = "matched by filters, selected by priority(visible&&!iconic&&!cloaked > root > max area)";
+  *reason = "matched by filters, selected by "
+            "priority(visible&&!iconic&&!cloaked > root > max area)";
   if (logger) {
-    logger->Log(LogLevel::kInfo, "ResolveWindowTarget candidates=" + std::to_string(candidates.size()));
+    logger->Log(LogLevel::kInfo, "ResolveWindowTarget candidates=" +
+                                     std::to_string(candidates.size()));
   }
   return true;
 }
 
-}  // namespace sc
+} // namespace sc

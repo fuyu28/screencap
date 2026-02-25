@@ -1,0 +1,38 @@
+{
+  "ok": true,
+  "command": "cap",
+  "method": "dxgi-window",
+  "target": "window",
+  "out_path": "C:\\temp\\shot.png",
+  "format": "png",
+  "timestamp": "2026-02-06T18:29:47.396+09:00",
+  "duration_ms": 123,
+  "dpi_mode": "per-monitor-v2",
+  "window": {
+    "hwnd": 5572270,
+    "pid": 15796,
+    "title": "Fate/stay night",
+    "class": "SDWRAP",
+    "rect": {"left": 0, "top": 0, "right": 1440, "bottom": 900},
+    "client_rect_screen": {"left": 558, "top": 324, "right": 1362, "bottom": 928},
+    "visible": true,
+    "iconic": false,
+    "cloaked": false
+  },
+  "monitor": {
+    "index": 0,
+    "desktop": {"left": 0, "top": 0, "right": 1920, "bottom": 1080},
+    "primary": true
+  },
+  "crop": {
+    "mode": "client",
+    "rect": {"x": 558, "y": 324, "w": 804, "h": 604},
+    "pad": {"l": 0, "t": 0, "r": 0, "b": 0}
+  },
+  "image_stats": {
+    "black_ratio": 0.02,
+    "transparent_ratio": 0.0,
+    "avg_luma": 110.4
+  },
+  "error": null
+}

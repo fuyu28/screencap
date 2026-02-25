@@ -34,9 +34,9 @@ wgd11::IDirect3DDevice CreateWinRtD3DDevice(ID3D11Device *d3d_device,
     return nullptr;
   }
 
-  ComPtr<::IInspectable> inspectable;
+  winrt::com_ptr<::IInspectable> inspectable;
   hr = CreateDirect3D11DeviceFromDXGIDevice(dxgi_device.Get(),
-                                            inspectable.GetAddressOf());
+                                            inspectable.put());
   if (FAILED(hr)) {
     *err = ErrorInfo{"CreateDirect3D11DeviceFromDXGIDevice failed",
                      "CreateWinRtD3DDevice", static_cast<uint32_t>(hr),
@@ -92,7 +92,10 @@ bool CopyFrameToImage(const wgc::Direct3D11CaptureFrame &frame,
                       ID3D11DeviceContext *context, const Rect &origin_rect,
                       ImageBuffer *out, ErrorInfo *err) {
   auto surface = frame.Surface();
-  auto access = surface.as<IDirect3DDxgiInterfaceAccess>();
+  auto access =
+      surface
+          .as<ABI::Windows::Graphics::DirectX::Direct3D11::
+                  IDirect3DDxgiInterfaceAccess>();
 
   ComPtr<ID3D11Texture2D> tex;
   HRESULT hr = access->GetInterface(IID_PPV_ARGS(&tex));

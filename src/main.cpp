@@ -458,6 +458,53 @@ std::string BuildFailureJson(const std::string &command,
   return oss.str();
 }
 
+bool WaitForHotkey(const ParsedArgs &parsed, Logger *logger, ErrorInfo *err) {
+  if (!parsed.cap.hotkey_enabled) {
+    return true;
+  }
+
+  constexpr int kHotkeyId = 0x5343;
+  if (!RegisterHotKey(nullptr, kHotkeyId, parsed.cap.hotkey_modifiers,
+                      parsed.cap.hotkey_vk)) {
+    *err = ErrorInfo{"RegisterHotKey failed", "WaitForHotkey", std::nullopt,
+                     static_cast<uint32_t>(GetLastError())};
+    return false;
+  }
+
+  if (logger) {
+    logger->Log(LogLevel::kInfo, "hotkey waiting spec=" + parsed.cap.hotkey_spec);
+  }
+  if (!parsed.common.json) {
+    std::cout << "waiting hotkey: " << parsed.cap.hotkey_spec << "\n";
+  }
+
+  MSG msg{};
+  bool ok = false;
+  while (true) {
+    const BOOL gm = GetMessageW(&msg, nullptr, 0, 0);
+    if (gm == -1) {
+      *err = ErrorInfo{"GetMessage failed", "WaitForHotkey", std::nullopt,
+                       static_cast<uint32_t>(GetLastError())};
+      break;
+    }
+    if (gm == 0) {
+      *err = ErrorInfo{"message loop ended before hotkey", "WaitForHotkey",
+                       std::nullopt, std::nullopt};
+      break;
+    }
+    if (msg.message == WM_HOTKEY && msg.wParam == kHotkeyId) {
+      ok = true;
+      break;
+    }
+  }
+
+  UnregisterHotKey(nullptr, kHotkeyId);
+  if (ok && !parsed.common.json) {
+    std::cout << "hotkey pressed\n";
+  }
+  return ok;
+}
+
 } // namespace
 
 } // namespace sc
@@ -495,13 +542,28 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  ParsedArgs run_args = parsed.args;
   RunResult rr;
   if (parsed.args.command == CommandType::kListWindows) {
     rr = RunListWindows(parsed.args);
   } else if (parsed.args.command == CommandType::kListMonitors) {
     rr = RunListMonitors(parsed.args);
   } else {
-    rr = RunCap(parsed.args, &logger, dpi_applied);
+    if (run_args.cap.hotkey_enabled) {
+      ErrorInfo wait_err;
+      if (!WaitForHotkey(run_args, &logger, &wait_err)) {
+        rr.err = wait_err;
+        rr.exit_code = 1;
+      } else {
+        if (run_args.cap.hotkey_foreground) {
+          run_args.cap.window_query = TargetWindowQuery{};
+          run_args.cap.window_query.foreground = true;
+        }
+        rr = RunCap(run_args, &logger, dpi_applied);
+      }
+    } else {
+      rr = RunCap(run_args, &logger, dpi_applied);
+    }
   }
 
   if (rr.ok) {

@@ -105,6 +105,10 @@ screencap cap --method <method> --target <window|screen> --out <path> [オプシ
 - 出力
   - `--format png`（現状 `png` のみ）
   - `--force-alpha 255`（255 のみ指定可）
+- ホットキー
+  - `--hotkey <combo>` 例: `ctrl+shift+s`, `alt+f9`
+  - `--hotkey-foreground`  
+    ホットキー押下時点の最前面ウィンドウを対象にする（`--target window` 必須）
 
 ## 実用例
 
@@ -131,6 +135,15 @@ screencap cap --method dxgi-window --target window --pid 15796 --crop client --o
 ```powershell
 screencap cap --method gdi-bitblt-screen --target screen --monitor primary --crop manual --crop-rect 100 100 800 600 --out crop.png --json
 ```
+
+### 5. ホットキーで前面ウィンドウを 1 回キャプチャ
+
+```powershell
+screencap cap --method dxgi-window --target window --hotkey ctrl+shift+s --hotkey-foreground --out hotkey.png --overwrite --json
+```
+
+起動後は待機状態になり、ホットキー押下で 1 回だけ撮影して終了します。  
+`--method dxgi-window` なら、フルスクリーン表示のウィンドウでも同じ経路で扱えます。
 
 ## エラー時の確認ポイント
 

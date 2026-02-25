@@ -1,5 +1,7 @@
 #include "cli.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <sstream>
 
@@ -51,6 +53,90 @@ CropMode ParseCropMode(const std::string &s) {
   if (s == "manual")
     return CropMode::kManual;
   return CropMode::kNone;
+}
+
+std::string ToLowerAscii(const std::string &s) {
+  std::string out = s;
+  std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) {
+    return static_cast<char>(tolower(c));
+  });
+  return out;
+}
+
+bool ParseFunctionKey(const std::string &token, UINT *vk) {
+  if (token.size() < 2 || token[0] != 'f') {
+    return false;
+  }
+  int n = 0;
+  if (!ParseInt(token.substr(1), &n) || n < 1 || n > 24) {
+    return false;
+  }
+  *vk = static_cast<UINT>(VK_F1 + (n - 1));
+  return true;
+}
+
+bool ParseHotkey(const std::string &spec, UINT *mods, UINT *vk) {
+  *mods = MOD_NOREPEAT;
+  *vk = 0;
+
+  std::istringstream iss(spec);
+  std::string token;
+  bool has_modifier = false;
+  while (std::getline(iss, token, '+')) {
+    token = ToLowerAscii(token);
+    if (token.empty()) {
+      return false;
+    }
+    if (token == "ctrl" || token == "control") {
+      *mods |= MOD_CONTROL;
+      has_modifier = true;
+      continue;
+    }
+    if (token == "alt") {
+      *mods |= MOD_ALT;
+      has_modifier = true;
+      continue;
+    }
+    if (token == "shift") {
+      *mods |= MOD_SHIFT;
+      has_modifier = true;
+      continue;
+    }
+    if (token == "win" || token == "windows") {
+      *mods |= MOD_WIN;
+      has_modifier = true;
+      continue;
+    }
+
+    if (*vk != 0) {
+      return false;
+    }
+    if (token.size() == 1) {
+      const unsigned char c = static_cast<unsigned char>(token[0]);
+      if (c >= 'a' && c <= 'z') {
+        *vk = static_cast<UINT>('A' + (c - 'a'));
+        continue;
+      }
+      if (c >= '0' && c <= '9') {
+        *vk = static_cast<UINT>(c);
+        continue;
+      }
+      return false;
+    }
+    if (ParseFunctionKey(token, vk)) {
+      continue;
+    }
+    if (token == "printscreen" || token == "prtsc" || token == "snapshot") {
+      *vk = VK_SNAPSHOT;
+      continue;
+    }
+    if (token == "space") {
+      *vk = VK_SPACE;
+      continue;
+    }
+    return false;
+  }
+  return has_modifier && *vk != 0;
 }
 
 } // namespace
@@ -226,6 +312,20 @@ ParseResult ParseArgs(int argc, char **argv) {
         return r;
       }
       out.cap.force_alpha_255 = true;
+    } else if (out.command == CommandType::kCap && a == "--hotkey") {
+      if (!NeedValue(i, argc, a, &r.error))
+        return r;
+      out.cap.hotkey_spec = argv[++i];
+      if (!ParseHotkey(out.cap.hotkey_spec, &out.cap.hotkey_modifiers,
+                       &out.cap.hotkey_vk)) {
+        r.error = "invalid --hotkey (ex: ctrl+shift+s, alt+f9)";
+        return r;
+      }
+      out.cap.hotkey_enabled = true;
+    } else if (out.command == CommandType::kCap &&
+               a == "--hotkey-foreground") {
+      out.cap.hotkey_foreground = true;
+      out.cap.window_query.foreground = true;
     } else {
       r.error = "unknown option: " + a;
       return r;
@@ -268,6 +368,14 @@ ParseResult ParseArgs(int argc, char **argv) {
     if (out.cap.crop_mode == CropMode::kManual &&
         !out.cap.crop_rect.has_value()) {
       r.error = "manual crop needs --crop-rect";
+      return r;
+    }
+    if (out.cap.hotkey_foreground && !out.cap.hotkey_enabled) {
+      r.error = "--hotkey-foreground needs --hotkey";
+      return r;
+    }
+    if (out.cap.hotkey_foreground && out.cap.target != TargetType::kWindow) {
+      r.error = "--hotkey-foreground needs --target window";
       return r;
     }
   }
@@ -319,7 +427,9 @@ std::string BuildHelpText() {
       << "Examples:\n"
       << "  screencap list windows --json\n"
       << "  screencap cap --method dxgi-monitor --target screen --monitor "
-         "primary --out a.png\n";
+         "primary --out a.png\n"
+      << "  screencap cap --method dxgi-window --target window --hotkey "
+         "ctrl+shift+s --hotkey-foreground --out a.png\n";
   return oss.str();
 }
 

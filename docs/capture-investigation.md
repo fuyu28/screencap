@@ -87,6 +87,8 @@ WGC の実コンテンツは `frame.ContentSize()` で示されるため、pool 
 以前のホットキー経路は、キー押下後に `ms-screenclip:` を起動して Snipping Tool の
 クリップボード画像を保存していた。現在は Snipping Tool を使わず、キー押下後に通常の
 `cap` と同じキャプチャ経路を実行する。
+ホットキー待機中にコンソールを表示したくない場合は、console subsystem の `screencap.exe`
+ではなく、window subsystem の `screencapw.exe` を使う。
 
 例:
 
@@ -94,6 +96,12 @@ WGC の実コンテンツは `frame.ContentSize()` で示されるため、pool 
 .\build\Release\screencap.exe cap --method wgc-window --target window --foreground --hotkey ctrl+shift+s --out hotkey-window.png --overwrite --json
 .\build\Release\screencap.exe cap --method wgc-monitor --target screen --monitor primary --hotkey alt+f9 --out hotkey-monitor.png --overwrite --json
 .\build\Release\screencap.exe cap --method gdi-bitblt-screen --target screen --monitor primary --hotkey alt+f10 --out hotkey-gdi.png --overwrite --json --force-alpha 255
+```
+
+No-console example:
+
+```powershell
+.\build\Release\screencapw.exe cap --method wgc-window --target window --foreground --hotkey ctrl+shift+s --out hotkey-window.png --overwrite --log-level debug
 ```
 
 `--target window` では `--foreground` / `--hwnd` / `--pid` / `--title` / `--class` のいずれかが必要。

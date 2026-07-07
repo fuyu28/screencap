@@ -19,6 +19,7 @@ cmake --build build --config Release
 生成物:
 
 - `build/Release/screencap.exe`
+- `build/Release/screencapw.exe`（ホットキー常駐向け・コンソール非表示）
 
 ## 使い方（クイックスタート）
 
@@ -144,6 +145,7 @@ screencap cap --method wgc-window --target window --foreground --hotkey ctrl+shi
 ```
 
 起動後は待機状態になり、ホットキー押下時点の前面ウィンドウを指定方式でキャプチャして終了します。
+ショートカットやスタートアップから起動してコンソールを出したくない場合は `screencapw.exe` を使います。
 
 ### 6. ホットキーでプライマリモニターを WGC 保存
 

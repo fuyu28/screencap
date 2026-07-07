@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_executable(screencap
+set(SCREENCAP_SOURCES
   src/main.cpp
   src/cli.cpp
   src/logging.cpp
@@ -20,15 +20,31 @@ add_executable(screencap
   src/util.cpp
 )
 
-target_include_directories(screencap PRIVATE src)
+function(configure_screencap_target target)
+  target_include_directories(${target} PRIVATE src)
 
-target_compile_definitions(screencap PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+  target_compile_definitions(${target} PRIVATE
+    UNICODE
+    _UNICODE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+  )
 
-target_link_libraries(screencap PRIVATE
-  d3d11
-  dxgi
-  windowsapp
-  dwmapi
-  shcore
-  windowscodecs
-)
+  target_link_libraries(${target} PRIVATE
+    d3d11
+    dxgi
+    windowsapp
+    dwmapi
+    shcore
+    windowscodecs
+  )
+endfunction()
+
+add_executable(screencap ${SCREENCAP_SOURCES})
+configure_screencap_target(screencap)
+
+add_executable(screencapw WIN32 ${SCREENCAP_SOURCES})
+configure_screencap_target(screencapw)
+if(MSVC)
+  target_link_options(screencapw PRIVATE /ENTRY:mainCRTStartup)
+endif()

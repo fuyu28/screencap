@@ -5,8 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(SCREENCAP_SOURCES
-  src/main.cpp
+set(SCREENCAP_CORE_SOURCES
   src/cli.cpp
   src/logging.cpp
   src/window_enum.cpp
@@ -37,14 +36,23 @@ function(configure_screencap_target target)
     dwmapi
     shcore
     windowscodecs
+    comctl32
+    comdlg32
   )
 endfunction()
 
-add_executable(screencap ${SCREENCAP_SOURCES})
+add_executable(screencap WIN32
+  src/gui_main.cpp
+  src/gui.cpp
+  ${SCREENCAP_CORE_SOURCES}
+)
 configure_screencap_target(screencap)
-
-add_executable(screencapw WIN32 ${SCREENCAP_SOURCES})
-configure_screencap_target(screencapw)
 if(MSVC)
-  target_link_options(screencapw PRIVATE /ENTRY:mainCRTStartup)
+  target_link_options(screencap PRIVATE /ENTRY:mainCRTStartup)
 endif()
+
+add_executable(screencap-cli
+  src/main.cpp
+  ${SCREENCAP_CORE_SOURCES}
+)
+configure_screencap_target(screencap-cli)

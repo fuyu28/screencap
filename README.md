@@ -19,7 +19,10 @@ cmake --build build --config Release
 生成物:
 
 - `build/Release/screencap.exe`
-- `build/Release/screencapw.exe`（ホットキー常駐向け・コンソール非表示）
+- `build/Release/screencap-cli.exe`
+
+`screencap.exe` はコンソールを出さない GUI アプリです。
+CLI は `screencap-cli.exe` を使います。
 
 ## 使い方（クイックスタート）
 
@@ -28,20 +31,29 @@ cmake --build build --config Release
 3. 失敗時はログと `--json` 出力を確認
 
 ```powershell
-screencap list windows --json
-screencap list monitors --json
+screencap-cli list windows --json
+screencap-cli list monitors --json
 
-screencap cap --method dxgi-monitor --target screen --monitor primary --out a.png --json
+screencap-cli cap --method dxgi-monitor --target screen --monitor primary --out a.png --json
 ```
 
 ## コマンド一覧
 
 ```powershell
-screencap help
-screencap list windows [--json] [共通オプション]
-screencap list monitors [--json] [共通オプション]
-screencap cap --method <method> --target <window|screen> --out <path> [オプション]
+screencap-cli help
+screencap-cli list windows [--json] [共通オプション]
+screencap-cli list monitors [--json] [共通オプション]
+screencap-cli cap --method <method> --target <window|screen> --out <path> [オプション]
 ```
+
+## GUI でウィンドウを選んで保存
+
+```powershell
+build\Release\screencap.exe
+```
+
+表示中のウィンドウ一覧から対象を選び、保存先と方式を指定して `Capture` を押すと PNG を保存します。
+既定方式は `wgc-window` です。必要に応じて `gdi-printwindow` / `gdi-bitblt-windowdc` / `dxgi-window` に切り替えられます。
 
 ## `cap` の必須オプション
 
@@ -117,40 +129,40 @@ screencap cap --method <method> --target <window|screen> --out <path> [オプシ
 ### 1. 前面ウィンドウを GDI で保存
 
 ```powershell
-screencap cap --method gdi-printwindow --target window --foreground --out fg.png --json
+screencap-cli cap --method gdi-printwindow --target window --foreground --out fg.png --json
 ```
 
 ### 2. プライマリモニターを DXGI で保存
 
 ```powershell
-screencap cap --method dxgi-monitor --target screen --monitor primary --out mon.png --json
+screencap-cli cap --method dxgi-monitor --target screen --monitor primary --out mon.png --json
 ```
 
 ### 3. 特定 PID のウィンドウをクライアント領域で切り抜く
 
 ```powershell
-screencap cap --method dxgi-window --target window --pid 15796 --crop client --out client.png --json
+screencap-cli cap --method dxgi-window --target window --pid 15796 --crop client --out client.png --json
 ```
 
 ### 4. 手動切り抜き
 
 ```powershell
-screencap cap --method gdi-bitblt-screen --target screen --monitor primary --crop manual --crop-rect 100 100 800 600 --out crop.png --json
+screencap-cli cap --method gdi-bitblt-screen --target screen --monitor primary --crop manual --crop-rect 100 100 800 600 --out crop.png --json
 ```
 
 ### 5. ホットキーで前面ウィンドウを WGC 保存
 
 ```powershell
-screencap cap --method wgc-window --target window --foreground --hotkey ctrl+shift+s --out hotkey.png --overwrite --json
+screencap-cli cap --method wgc-window --target window --foreground --hotkey ctrl+shift+s --out hotkey.png --overwrite --json
 ```
 
 起動後は待機状態になり、ホットキー押下時点の前面ウィンドウを指定方式でキャプチャして終了します。
-ショートカットやスタートアップから起動してコンソールを出したくない場合は `screencapw.exe` を使います。
+CLI はコンソールアプリです。コンソールを出したくない操作は `screencap.exe` 側の GUI に寄せます。
 
 ### 6. ホットキーでプライマリモニターを WGC 保存
 
 ```powershell
-screencap cap --method wgc-monitor --target screen --monitor primary --hotkey alt+f9 --out monitor.png --overwrite --json
+screencap-cli cap --method wgc-monitor --target screen --monitor primary --hotkey alt+f9 --out monitor.png --overwrite --json
 ```
 
 ## エラー時の確認ポイント

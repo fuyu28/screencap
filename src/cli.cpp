@@ -415,17 +415,17 @@ const char *CropModeName(CropMode m) {
 
 std::string BuildHelpText() {
   std::ostringstream oss;
-  oss << "screencap - Windows screenshot comparison CLI\n\n"
+  oss << "screencap-cli - Windows screenshot comparison CLI\n\n"
       << "Commands:\n"
       << "  cap\n"
       << "  list windows\n"
       << "  list monitors\n\n"
       << "Examples:\n"
-      << "  screencap list windows --json\n"
-      << "  screencap cap --method dxgi-monitor --target screen --monitor "
+      << "  screencap-cli list windows --json\n"
+      << "  screencap-cli cap --method dxgi-monitor --target screen --monitor "
          "primary --out a.png\n"
-      << "  screencap cap --method wgc-window --target window --foreground "
-         "--hotkey ctrl+shift+s --out a.png\n";
+      << "  screencap-cli cap --method wgc-window --target window "
+         "--foreground --hotkey ctrl+shift+s --out a.png\n";
   return oss.str();
 }
 

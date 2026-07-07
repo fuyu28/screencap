@@ -29,14 +29,20 @@ bool SavePngWic(const ImageBuffer &img, const std::wstring &out_path,
     return false;
   }
 
+  struct CoInitGuard {
+    bool active = false;
+    ~CoInitGuard() {
+      if (active)
+        CoUninitialize();
+    }
+  } co_guard{need_uninit};
+
   Microsoft::WRL::ComPtr<IWICImagingFactory> factory;
   hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
                         IID_PPV_ARGS(&factory));
   if (FAILED(hr)) {
     *err = ErrorInfo{"CoCreateInstance IWICImagingFactory failed", "SavePngWic",
                      static_cast<uint32_t>(hr), std::nullopt};
-    if (need_uninit)
-      CoUninitialize();
     return false;
   }
 
@@ -45,8 +51,6 @@ bool SavePngWic(const ImageBuffer &img, const std::wstring &out_path,
   if (FAILED(hr)) {
     *err = ErrorInfo{"CreateStream failed", "SavePngWic",
                      static_cast<uint32_t>(hr), std::nullopt};
-    if (need_uninit)
-      CoUninitialize();
     return false;
   }
 
@@ -54,8 +58,6 @@ bool SavePngWic(const ImageBuffer &img, const std::wstring &out_path,
   if (FAILED(hr)) {
     *err = ErrorInfo{"InitializeFromFilename failed", "SavePngWic",
                      static_cast<uint32_t>(hr), std::nullopt};
-    if (need_uninit)
-      CoUninitialize();
     return false;
   }
 
@@ -64,8 +66,6 @@ bool SavePngWic(const ImageBuffer &img, const std::wstring &out_path,
   if (FAILED(hr)) {
     *err = ErrorInfo{"CreateEncoder failed", "SavePngWic",
                      static_cast<uint32_t>(hr), std::nullopt};
-    if (need_uninit)
-      CoUninitialize();
     return false;
   }
 
@@ -73,8 +73,6 @@ bool SavePngWic(const ImageBuffer &img, const std::wstring &out_path,
   if (FAILED(hr)) {
     *err = ErrorInfo{"Encoder Initialize failed", "SavePngWic",
                      static_cast<uint32_t>(hr), std::nullopt};
-    if (need_uninit)
-      CoUninitialize();
     return false;
   }
 
@@ -84,8 +82,6 @@ bool SavePngWic(const ImageBuffer &img, const std::wstring &out_path,
   if (FAILED(hr)) {
     *err = ErrorInfo{"CreateNewFrame failed", "SavePngWic",
                      static_cast<uint32_t>(hr), std::nullopt};
-    if (need_uninit)
-      CoUninitialize();
     return false;
   }
 
@@ -93,8 +89,6 @@ bool SavePngWic(const ImageBuffer &img, const std::wstring &out_path,
   if (FAILED(hr)) {
     *err = ErrorInfo{"Frame Initialize failed", "SavePngWic",
                      static_cast<uint32_t>(hr), std::nullopt};
-    if (need_uninit)
-      CoUninitialize();
     return false;
   }
 
@@ -103,8 +97,6 @@ bool SavePngWic(const ImageBuffer &img, const std::wstring &out_path,
   if (FAILED(hr)) {
     *err = ErrorInfo{"SetSize failed", "SavePngWic", static_cast<uint32_t>(hr),
                      std::nullopt};
-    if (need_uninit)
-      CoUninitialize();
     return false;
   }
 
@@ -113,8 +105,6 @@ bool SavePngWic(const ImageBuffer &img, const std::wstring &out_path,
   if (FAILED(hr)) {
     *err = ErrorInfo{"SetPixelFormat failed", "SavePngWic",
                      static_cast<uint32_t>(hr), std::nullopt};
-    if (need_uninit)
-      CoUninitialize();
     return false;
   }
 
@@ -124,8 +114,6 @@ bool SavePngWic(const ImageBuffer &img, const std::wstring &out_path,
   if (FAILED(hr)) {
     *err = ErrorInfo{"WritePixels failed", "SavePngWic",
                      static_cast<uint32_t>(hr), std::nullopt};
-    if (need_uninit)
-      CoUninitialize();
     return false;
   }
 
@@ -133,8 +121,6 @@ bool SavePngWic(const ImageBuffer &img, const std::wstring &out_path,
   if (FAILED(hr)) {
     *err = ErrorInfo{"Frame Commit failed", "SavePngWic",
                      static_cast<uint32_t>(hr), std::nullopt};
-    if (need_uninit)
-      CoUninitialize();
     return false;
   }
 
@@ -142,13 +128,9 @@ bool SavePngWic(const ImageBuffer &img, const std::wstring &out_path,
   if (FAILED(hr)) {
     *err = ErrorInfo{"Encoder Commit failed", "SavePngWic",
                      static_cast<uint32_t>(hr), std::nullopt};
-    if (need_uninit)
-      CoUninitialize();
     return false;
   }
 
-  if (need_uninit)
-    CoUninitialize();
   return true;
 }
 

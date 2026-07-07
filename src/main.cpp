@@ -213,6 +213,7 @@ RunResult RunCap(const ParsedArgs &parsed, Logger *logger,
   ctx.method = parsed.cap.method;
   ctx.cap = parsed.cap;
   ctx.common = parsed.common;
+  ctx.logger = logger;
 
   std::string resolve_reason;
   if (parsed.cap.target == TargetType::kWindow ||

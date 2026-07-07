@@ -60,6 +60,7 @@ screencap cap --method <method> --target <window|screen> --out <path> [オプシ
 - WGC
   - `wgc-window`
   - `wgc-monitor`
+  - `wgc-window2` / `wgc-monitor2`（実験時の互換エイリアス）
 - DXGI
   - `dxgi-window`
   - `dxgi-monitor`
@@ -179,3 +180,10 @@ Snipping Tool で範囲選択すると、クリップボード画像を取得し
 - `--format` は `png` のみ
 - 方式の自動フォールバック（`auto`）未実装
 - 他方式への自動切り替え再試行は未実装（`--retry` は同方式のみ）
+- `dxgi-monitor` は環境によって正常終了しても全黒になる場合があります。
+  現時点の主経路は `wgc-window` / `wgc-monitor` です。
+
+## 調査メモ
+
+Snipping Tool に依存しないキャプチャ経路の調査結果は
+[`docs/capture-investigation.md`](docs/capture-investigation.md) にまとめています。

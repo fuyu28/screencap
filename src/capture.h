@@ -7,6 +7,8 @@
 
 namespace sc {
 
+class Logger;
+
 struct CaptureContext {
   std::string method;
   CapOptions cap;
@@ -14,6 +16,7 @@ struct CaptureContext {
   std::optional<WindowInfo> window;
   std::optional<MonitorInfo> monitor;
   Rect capture_rect_screen;
+  Logger *logger = nullptr;
 };
 
 bool CaptureWithGdi(const CaptureContext &ctx, ImageBuffer *out,

@@ -82,8 +82,24 @@ WGC の実コンテンツは `frame.ContentSize()` で示されるため、pool 
 `wgc-window2` / `wgc-monitor2` は実験時のエイリアスとして残しているが、
 現在は通常の `wgc-window` / `wgc-monitor` と同じ WGC 改善経路を通る。
 
+## Hotkey capture
+
+以前のホットキー経路は、キー押下後に `ms-screenclip:` を起動して Snipping Tool の
+クリップボード画像を保存していた。現在は Snipping Tool を使わず、キー押下後に通常の
+`cap` と同じキャプチャ経路を実行する。
+
+例:
+
+```powershell
+.\build\Release\screencap.exe cap --method wgc-window --target window --foreground --hotkey ctrl+shift+s --out hotkey-window.png --overwrite --json
+.\build\Release\screencap.exe cap --method wgc-monitor --target screen --monitor primary --hotkey alt+f9 --out hotkey-monitor.png --overwrite --json
+.\build\Release\screencap.exe cap --method gdi-bitblt-screen --target screen --monitor primary --hotkey alt+f10 --out hotkey-gdi.png --overwrite --json --force-alpha 255
+```
+
+`--target window` では `--foreground` / `--hwnd` / `--pid` / `--title` / `--class` のいずれかが必要。
+`--foreground` を指定した場合、対象は起動時ではなくホットキー押下後に解決される。
+
 ## 次に試すこと
 
-- ホットキー押下後に Snipping Tool ではなく `wgc-*` で取得する経路へ差し替える。
 - ゲーム画面で `wgc-monitor`、`wgc-window`、`gdi-bitblt-screen` を比較する。
 - ゲームが排他的フルスクリーンの場合は、まず borderless/windowed と exclusive fullscreen を分けて記録する。

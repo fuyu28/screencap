@@ -109,7 +109,7 @@ screencap cap --method <method> --target <window|screen> --out <path> [オプシ
 - ホットキー
   - `--hotkey <combo>` 例: `ctrl+shift+s`, `alt+f9`
   - `--hotkey-foreground`  
-    互換オプション（現在の `ms-screenclip` 経路では未使用）
+    `--foreground` を同時指定する互換オプション
 
 ## 実用例
 
@@ -137,14 +137,19 @@ screencap cap --method dxgi-window --target window --pid 15796 --crop client --o
 screencap cap --method gdi-bitblt-screen --target screen --monitor primary --crop manual --crop-rect 100 100 800 600 --out crop.png --json
 ```
 
-### 5. ホットキーで Snipping Tool を起動して保存
+### 5. ホットキーで前面ウィンドウを WGC 保存
 
 ```powershell
-screencap cap --method dxgi-window --target window --hotkey ctrl+shift+s --out hotkey.png --overwrite --json
+screencap cap --method wgc-window --target window --foreground --hotkey ctrl+shift+s --out hotkey.png --overwrite --json
 ```
 
-起動後は待機状態になり、ホットキー押下で `ms-screenclip:` を起動します。  
-Snipping Tool で範囲選択すると、クリップボード画像を取得して PNG 保存して終了します。
+起動後は待機状態になり、ホットキー押下時点の前面ウィンドウを指定方式でキャプチャして終了します。
+
+### 6. ホットキーでプライマリモニターを WGC 保存
+
+```powershell
+screencap cap --method wgc-monitor --target screen --monitor primary --hotkey alt+f9 --out monitor.png --overwrite --json
+```
 
 ## エラー時の確認ポイント
 

@@ -58,13 +58,13 @@ bool IsPickableWindow(const WindowInfo &w) {
 }
 
 std::wstring DefaultOutputPath() {
+  const std::wstring filename =
+      L"screenshot_" + WideFromUtf8(BuildTimestampForFilename()) + L".png";
   wchar_t cwd[MAX_PATH] = {};
   if (!GetCurrentDirectoryW(static_cast<DWORD>(std::size(cwd)), cwd)) {
-    return L"screenshot_" + WideFromUtf8(BuildTimestampForFilename()) + L".png";
+    return filename;
   }
-  std::filesystem::path p(cwd);
-  p /= L"screenshot_" + WideFromUtf8(BuildTimestampForFilename()) + L".png";
-  return p.wstring();
+  return (std::filesystem::path(cwd) / filename).wstring();
 }
 
 std::wstring GetWindowTextString(HWND hwnd) {

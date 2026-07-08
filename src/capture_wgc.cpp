@@ -9,6 +9,7 @@
 
 #include <cstring>
 #include <exception>
+#include <mutex>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Graphics.Capture.h>
 #include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
@@ -264,11 +265,20 @@ bool CaptureWithWgc(const CaptureContext &ctx, ImageBuffer *out,
       return false;
     }
 
+    // FrameArrived fires on a free-threaded pool worker, so all access to
+    // `captured` is serialized through `frame_mutex`. The main loop moves the
+    // frame out under the lock before touching it, which prevents a later frame
+    // from releasing the object we are still copying (use-after-free). The
+    // handler does no logging: Logger is not thread-safe.
     wgc::Direct3D11CaptureFrame captured{nullptr};
+    std::mutex frame_mutex;
     auto revoker =
         frame_pool.FrameArrived(winrt::auto_revoke, [&](auto &sender, auto &) {
-          WgcLog(ctx.logger, "frame arrived");
-          captured = sender.TryGetNextFrame();
+          auto frame = sender.TryGetNextFrame();
+          {
+            std::lock_guard<std::mutex> lock(frame_mutex);
+            captured = frame;
+          }
           SetEvent(ev);
         });
 
@@ -281,11 +291,18 @@ bool CaptureWithWgc(const CaptureContext &ctx, ImageBuffer *out,
     for (int frame_index = 0; frame_index < kMaxFrames; ++frame_index) {
       DWORD wr =
           WaitForSingleObject(ev, static_cast<DWORD>(ctx.common.timeout_ms));
-      if (wr != WAIT_OBJECT_0 || !captured) {
+
+      wgc::Direct3D11CaptureFrame frame{nullptr};
+      {
+        std::lock_guard<std::mutex> lock(frame_mutex);
+        frame = std::move(captured);
+        ResetEvent(ev);
+      }
+      if (wr != WAIT_OBJECT_0 || !frame) {
         WgcLog(ctx.logger, "wait did not produce frame");
         continue;
       }
-      ResetEvent(ev);
+      WgcLog(ctx.logger, "frame arrived");
 
       Rect origin = ctx.capture_rect_screen;
       if ((ctx.method == "wgc-window" || ctx.method == "wgc-window2") &&
@@ -294,7 +311,7 @@ bool CaptureWithWgc(const CaptureContext &ctx, ImageBuffer *out,
       }
 
       ImageBuffer candidate;
-      if (!CopyFrameToImage(captured, d3d_device.Get(), d3d_context.Get(),
+      if (!CopyFrameToImage(frame, d3d_device.Get(), d3d_context.Get(),
                             origin, true, &candidate, &copy_err)) {
         WgcLog(ctx.logger, "copy frame failed: " + copy_err.message);
         continue;

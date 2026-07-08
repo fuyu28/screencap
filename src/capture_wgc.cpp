@@ -1,4 +1,5 @@
 #include "capture.h"
+#include "d3d_readback.h"
 #include "image_stats.h"
 #include "logging.h"
 
@@ -7,7 +8,7 @@
 #include <windows.graphics.capture.interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
 
-#include <cstring>
+#include <algorithm>
 #include <exception>
 #include <mutex>
 #include <winrt/Windows.Foundation.h>
@@ -32,9 +33,8 @@ wgd11::IDirect3DDevice CreateWinRtD3DDevice(ID3D11Device *d3d_device,
   ComPtr<IDXGIDevice> dxgi_device;
   HRESULT hr = d3d_device->QueryInterface(IID_PPV_ARGS(&dxgi_device));
   if (FAILED(hr)) {
-    *err =
-        ErrorInfo{"QueryInterface IDXGIDevice failed", "CreateWinRtD3DDevice",
-                  static_cast<uint32_t>(hr), std::nullopt};
+    FailHr(err, "QueryInterface IDXGIDevice failed", "CreateWinRtD3DDevice",
+           hr);
     return nullptr;
   }
 
@@ -42,49 +42,26 @@ wgd11::IDirect3DDevice CreateWinRtD3DDevice(ID3D11Device *d3d_device,
   hr = CreateDirect3D11DeviceFromDXGIDevice(dxgi_device.Get(),
                                             inspectable.put());
   if (FAILED(hr)) {
-    *err = ErrorInfo{"CreateDirect3D11DeviceFromDXGIDevice failed",
-                     "CreateWinRtD3DDevice", static_cast<uint32_t>(hr),
-                     std::nullopt};
+    FailHr(err, "CreateDirect3D11DeviceFromDXGIDevice failed",
+           "CreateWinRtD3DDevice", hr);
     return nullptr;
   }
 
   return inspectable.as<wgd11::IDirect3DDevice>();
 }
 
-bool CreateCaptureItemFromHwnd(HWND hwnd, wgc::GraphicsCaptureItem *item,
-                               ErrorInfo *err) {
+// `create` invokes the interop factory (CreateForWindow / CreateForMonitor)
+// and returns its HRESULT; `what` names the call for error reporting.
+template <typename CreateFn>
+bool CreateCaptureItem(CreateFn create, const char *what,
+                       wgc::GraphicsCaptureItem *item, ErrorInfo *err) {
   auto interop = winrt::get_activation_factory<wgc::GraphicsCaptureItem,
                                                IGraphicsCaptureItemInterop>();
   winrt::com_ptr<ABI::Windows::Graphics::Capture::IGraphicsCaptureItem>
       abi_item;
-  HRESULT hr = interop->CreateForWindow(
-      hwnd,
-      winrt::guid_of<ABI::Windows::Graphics::Capture::IGraphicsCaptureItem>(),
-      abi_item.put_void());
+  HRESULT hr = create(interop, abi_item.put_void());
   if (FAILED(hr)) {
-    *err = ErrorInfo{"CreateForWindow failed", "CreateCaptureItemFromHwnd",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
-  }
-
-  *item = abi_item.as<wgc::GraphicsCaptureItem>();
-  return true;
-}
-
-bool CreateCaptureItemFromMonitor(HMONITOR hmon, wgc::GraphicsCaptureItem *item,
-                                  ErrorInfo *err) {
-  auto interop = winrt::get_activation_factory<wgc::GraphicsCaptureItem,
-                                               IGraphicsCaptureItemInterop>();
-  winrt::com_ptr<ABI::Windows::Graphics::Capture::IGraphicsCaptureItem>
-      abi_item;
-  HRESULT hr = interop->CreateForMonitor(
-      hmon,
-      winrt::guid_of<ABI::Windows::Graphics::Capture::IGraphicsCaptureItem>(),
-      abi_item.put_void());
-  if (FAILED(hr)) {
-    *err = ErrorInfo{"CreateForMonitor failed", "CreateCaptureItemFromMonitor",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
+    return FailHr(err, std::string(what) + " failed", "CreateCaptureItem", hr);
   }
 
   *item = abi_item.as<wgc::GraphicsCaptureItem>();
@@ -104,75 +81,31 @@ bool CopyFrameToImage(const wgc::Direct3D11CaptureFrame &frame,
   ComPtr<ID3D11Texture2D> tex;
   HRESULT hr = access->GetInterface(IID_PPV_ARGS(&tex));
   if (FAILED(hr)) {
-    *err = ErrorInfo{"GetInterface(ID3D11Texture2D) failed", "CopyFrameToImage",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
+    return FailHr(err, "GetInterface(ID3D11Texture2D) failed",
+                  "CopyFrameToImage", hr);
   }
 
   D3D11_TEXTURE2D_DESC desc{};
   tex->GetDesc(&desc);
+  UINT w = desc.Width;
+  UINT h = desc.Height;
   if (use_content_size) {
     const auto content_size = frame.ContentSize();
     if (content_size.Width <= 0 || content_size.Height <= 0) {
-      *err = ErrorInfo{"invalid WGC ContentSize", "CopyFrameToImage",
-                       std::nullopt, std::nullopt};
-      return false;
+      return Fail(err, "invalid WGC ContentSize", "CopyFrameToImage");
     }
-    desc.Width =
-        std::min(desc.Width, static_cast<UINT>(content_size.Width));
-    desc.Height =
-        std::min(desc.Height, static_cast<UINT>(content_size.Height));
+    w = std::min(w, static_cast<UINT>(content_size.Width));
+    h = std::min(h, static_cast<UINT>(content_size.Height));
   }
-  desc.BindFlags = 0;
-  desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-  desc.MiscFlags = 0;
-  desc.Usage = D3D11_USAGE_STAGING;
 
-  ComPtr<ID3D11Texture2D> staging;
-  hr = device->CreateTexture2D(&desc, nullptr, &staging);
-  if (FAILED(hr)) {
-    *err = ErrorInfo{"CreateTexture2D staging failed", "CopyFrameToImage",
-                     static_cast<uint32_t>(hr), std::nullopt};
+  if (!ReadTextureToImage(device, context, tex.Get(), w, h,
+                          static_cast<int>(w), static_cast<int>(h),
+                          /*copy_region=*/use_content_size, "CopyFrameToImage",
+                          out, err)) {
     return false;
   }
-
-  if (use_content_size) {
-    D3D11_BOX src_box{};
-    src_box.left = 0;
-    src_box.top = 0;
-    src_box.front = 0;
-    src_box.right = desc.Width;
-    src_box.bottom = desc.Height;
-    src_box.back = 1;
-    context->CopySubresourceRegion(staging.Get(), 0, 0, 0, 0, tex.Get(), 0,
-                                   &src_box);
-  } else {
-    context->CopyResource(staging.Get(), tex.Get());
-  }
-
-  D3D11_MAPPED_SUBRESOURCE map{};
-  hr = context->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &map);
-  if (FAILED(hr)) {
-    *err = ErrorInfo{"Map staging failed", "CopyFrameToImage",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
-  }
-
-  out->width = static_cast<int>(desc.Width);
-  out->height = static_cast<int>(desc.Height);
-  out->row_pitch = out->width * 4;
   out->origin_x = origin_rect.left;
   out->origin_y = origin_rect.top;
-  out->bgra.resize(static_cast<size_t>(out->row_pitch * out->height));
-
-  for (int y = 0; y < out->height; ++y) {
-    const uint8_t *src = static_cast<const uint8_t *>(map.pData) +
-                         static_cast<size_t>(y * map.RowPitch);
-    uint8_t *dst = out->bgra.data() + static_cast<size_t>(y * out->row_pitch);
-    memcpy(dst, src, static_cast<size_t>(out->row_pitch));
-  }
-
-  context->Unmap(staging.Get(), 0);
   return true;
 }
 
@@ -187,6 +120,23 @@ void WgcLog(Logger *logger, const std::string &msg) {
   }
 }
 
+// Runs `fn` when the guard goes out of scope, regardless of how the scope is
+// exited (normal return or exception), so WinRT/Win32 resources are always
+// released even if a winrt::hresult_error is thrown mid-capture.
+template <typename F>
+struct ScopeExit {
+  F fn;
+  ~ScopeExit() {
+    try {
+      fn();
+    } catch (...) {
+    }
+  }
+};
+
+template <typename F>
+ScopeExit(F) -> ScopeExit<F>;
+
 } // namespace
 
 bool CaptureWithWgc(const CaptureContext &ctx, ImageBuffer *out,
@@ -197,9 +147,8 @@ bool CaptureWithWgc(const CaptureContext &ctx, ImageBuffer *out,
 
     WgcLog(ctx.logger, "check supported");
     if (!wgc::GraphicsCaptureSession::IsSupported()) {
-      *err = ErrorInfo{"GraphicsCaptureSession::IsSupported false",
-                       "CaptureWithWgc", std::nullopt, std::nullopt};
-      return false;
+      return Fail(err, "GraphicsCaptureSession::IsSupported false",
+                  "CaptureWithWgc");
     }
 
     WgcLog(ctx.logger, "create d3d device");
@@ -210,9 +159,7 @@ bool CaptureWithWgc(const CaptureContext &ctx, ImageBuffer *out,
         D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION,
         &d3d_device, nullptr, &d3d_context);
     if (FAILED(hr)) {
-      *err = ErrorInfo{"D3D11CreateDevice failed", "CaptureWithWgc",
-                       static_cast<uint32_t>(hr), std::nullopt};
-      return false;
+      return FailHr(err, "D3D11CreateDevice failed", "CaptureWithWgc", hr);
     }
 
     WgcLog(ctx.logger, "create winrt d3d device");
@@ -221,31 +168,41 @@ bool CaptureWithWgc(const CaptureContext &ctx, ImageBuffer *out,
       return false;
     }
 
+    const auto &method = ctx.cap.method;
+    const bool is_window = method == "wgc-window" || method == "wgc-window2";
+    const bool is_monitor = method == "wgc-monitor" || method == "wgc-monitor2";
+    const auto item_guid =
+        winrt::guid_of<ABI::Windows::Graphics::Capture::IGraphicsCaptureItem>();
+
     wgc::GraphicsCaptureItem item{nullptr};
-    if (ctx.method == "wgc-window" || ctx.method == "wgc-window2") {
+    if (is_window) {
       WgcLog(ctx.logger, "create item for window");
       if (!ctx.window.has_value()) {
-        *err = ErrorInfo{"wgc-window needs window target", "CaptureWithWgc",
-                         std::nullopt, std::nullopt};
+        return Fail(err, "wgc-window needs window target", "CaptureWithWgc");
+      }
+      HWND hwnd = ctx.window->hwnd;
+      if (!CreateCaptureItem(
+              [&](auto &interop, void **out_item) {
+                return interop->CreateForWindow(hwnd, item_guid, out_item);
+              },
+              "CreateForWindow", &item, err)) {
         return false;
       }
-      if (!CreateCaptureItemFromHwnd(ctx.window->hwnd, &item, err)) {
-        return false;
-      }
-    } else if (ctx.method == "wgc-monitor" || ctx.method == "wgc-monitor2") {
+    } else if (is_monitor) {
       WgcLog(ctx.logger, "create item for monitor");
       if (!ctx.monitor.has_value()) {
-        *err = ErrorInfo{"wgc-monitor needs monitor target", "CaptureWithWgc",
-                         std::nullopt, std::nullopt};
-        return false;
+        return Fail(err, "wgc-monitor needs monitor target", "CaptureWithWgc");
       }
-      if (!CreateCaptureItemFromMonitor(ctx.monitor->hmon, &item, err)) {
+      HMONITOR hmon = ctx.monitor->hmon;
+      if (!CreateCaptureItem(
+              [&](auto &interop, void **out_item) {
+                return interop->CreateForMonitor(hmon, item_guid, out_item);
+              },
+              "CreateForMonitor", &item, err)) {
         return false;
       }
     } else {
-      *err = ErrorInfo{"unknown wgc method", "CaptureWithWgc", std::nullopt,
-                       std::nullopt};
-      return false;
+      return Fail(err, "unknown wgc method", "CaptureWithWgc");
     }
 
     auto size = item.Size();
@@ -260,10 +217,23 @@ bool CaptureWithWgc(const CaptureContext &ctx, ImageBuffer *out,
     WgcLog(ctx.logger, "create event");
     HANDLE ev = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!ev) {
-      *err = ErrorInfo{"CreateEvent failed", "CaptureWithWgc", std::nullopt,
-                       static_cast<uint32_t>(GetLastError())};
-      return false;
+      return FailWin32(err, "CreateEvent failed", "CaptureWithWgc");
     }
+
+    // Guarantees session/frame_pool/ev are released on every exit path,
+    // including a winrt::hresult_error thrown by StartCapture() or by
+    // CopyFrameToImage's surface.as<>() call. Declared before `captured`,
+    // `frame_mutex`, and `revoker` so it is destroyed after them: the frame
+    // handler is revoked and the last frame released before the session,
+    // frame pool, and event are closed.
+    ScopeExit cleanup{[&] {
+      WgcLog(ctx.logger, "close session");
+      session.Close();
+      WgcLog(ctx.logger, "close frame pool");
+      frame_pool.Close();
+      WgcLog(ctx.logger, "close event");
+      CloseHandle(ev);
+    }};
 
     // FrameArrived fires on a free-threaded pool worker, so all access to
     // `captured` is serialized through `frame_mutex`. The main loop moves the
@@ -278,8 +248,8 @@ bool CaptureWithWgc(const CaptureContext &ctx, ImageBuffer *out,
           {
             std::lock_guard<std::mutex> lock(frame_mutex);
             captured = frame;
+            SetEvent(ev);
           }
-          SetEvent(ev);
         });
 
     WgcLog(ctx.logger, "start capture");
@@ -305,9 +275,11 @@ bool CaptureWithWgc(const CaptureContext &ctx, ImageBuffer *out,
       WgcLog(ctx.logger, "frame arrived");
 
       Rect origin = ctx.capture_rect_screen;
-      if ((ctx.method == "wgc-window" || ctx.method == "wgc-window2") &&
-          ctx.window.has_value()) {
-        origin = ctx.window->rect;
+      if (is_window && ctx.window.has_value()) {
+        // A window GraphicsCaptureItem's surface covers the DWM extended
+        // frame bounds (client area plus visible chrome, excluding the
+        // invisible resize border), not the raw GetWindowRect rect.
+        origin = ctx.window->dwm_frame_rect;
       }
 
       ImageBuffer candidate;
@@ -329,32 +301,22 @@ bool CaptureWithWgc(const CaptureContext &ctx, ImageBuffer *out,
     revoker.revoke();
     WgcLog(ctx.logger, "release captured frame");
     captured = nullptr;
-    WgcLog(ctx.logger, "close session");
-    session.Close();
-    WgcLog(ctx.logger, "close frame pool");
-    frame_pool.Close();
-    WgcLog(ctx.logger, "close event");
-    CloseHandle(ev);
 
     if (!have_candidate) {
       if (!copy_err.message.empty()) {
         *err = copy_err;
         return false;
       }
-      *err = ErrorInfo{"WGC frame timeout", "CaptureWithWgc", std::nullopt,
-                       std::nullopt};
-      return false;
+      return Fail(err, "WGC frame timeout", "CaptureWithWgc");
     }
 
     *out = std::move(best);
     return true;
   } catch (const winrt::hresult_error &e) {
-    *err = ErrorInfo{winrt::to_string(e.message()), "CaptureWithWgc",
-                     static_cast<uint32_t>(e.code()), std::nullopt};
-    return false;
+    return FailHr(err, winrt::to_string(e.message()), "CaptureWithWgc",
+                  e.code());
   } catch (const std::exception &e) {
-    *err = ErrorInfo{e.what(), "CaptureWithWgc", std::nullopt, std::nullopt};
-    return false;
+    return Fail(err, e.what(), "CaptureWithWgc");
   }
 }
 

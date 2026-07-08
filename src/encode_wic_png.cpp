@@ -11,9 +11,7 @@ bool SavePngWic(const ImageBuffer &img, const std::wstring &out_path,
   if (!overwrite) {
     DWORD attrs = GetFileAttributesW(out_path.c_str());
     if (attrs != INVALID_FILE_ATTRIBUTES) {
-      *err = ErrorInfo{"output exists (use --overwrite)", "SavePngWic",
-                       std::nullopt, std::nullopt};
-      return false;
+      return Fail(err, "output exists (use --overwrite)", "SavePngWic");
     }
   }
 
@@ -24,9 +22,7 @@ bool SavePngWic(const ImageBuffer &img, const std::wstring &out_path,
     hr = S_OK;
   }
   if (FAILED(hr)) {
-    *err = ErrorInfo{"CoInitializeEx failed", "SavePngWic",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
+    return FailHr(err, "CoInitializeEx failed", "SavePngWic", hr);
   }
 
   struct CoInitGuard {
@@ -41,94 +37,71 @@ bool SavePngWic(const ImageBuffer &img, const std::wstring &out_path,
   hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
                         IID_PPV_ARGS(&factory));
   if (FAILED(hr)) {
-    *err = ErrorInfo{"CoCreateInstance IWICImagingFactory failed", "SavePngWic",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
+    return FailHr(err, "CoCreateInstance IWICImagingFactory failed",
+                  "SavePngWic", hr);
   }
 
   Microsoft::WRL::ComPtr<IWICStream> stream;
   hr = factory->CreateStream(&stream);
   if (FAILED(hr)) {
-    *err = ErrorInfo{"CreateStream failed", "SavePngWic",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
+    return FailHr(err, "CreateStream failed", "SavePngWic", hr);
   }
 
   hr = stream->InitializeFromFilename(out_path.c_str(), GENERIC_WRITE);
   if (FAILED(hr)) {
-    *err = ErrorInfo{"InitializeFromFilename failed", "SavePngWic",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
+    return FailHr(err, "InitializeFromFilename failed", "SavePngWic", hr);
   }
 
   Microsoft::WRL::ComPtr<IWICBitmapEncoder> encoder;
   hr = factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder);
   if (FAILED(hr)) {
-    *err = ErrorInfo{"CreateEncoder failed", "SavePngWic",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
+    return FailHr(err, "CreateEncoder failed", "SavePngWic", hr);
   }
 
   hr = encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache);
   if (FAILED(hr)) {
-    *err = ErrorInfo{"Encoder Initialize failed", "SavePngWic",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
+    return FailHr(err, "Encoder Initialize failed", "SavePngWic", hr);
   }
 
   Microsoft::WRL::ComPtr<IWICBitmapFrameEncode> frame;
   Microsoft::WRL::ComPtr<IPropertyBag2> props;
   hr = encoder->CreateNewFrame(&frame, &props);
   if (FAILED(hr)) {
-    *err = ErrorInfo{"CreateNewFrame failed", "SavePngWic",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
+    return FailHr(err, "CreateNewFrame failed", "SavePngWic", hr);
   }
 
   hr = frame->Initialize(props.Get());
   if (FAILED(hr)) {
-    *err = ErrorInfo{"Frame Initialize failed", "SavePngWic",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
+    return FailHr(err, "Frame Initialize failed", "SavePngWic", hr);
   }
 
   hr = frame->SetSize(static_cast<UINT>(img.width),
                       static_cast<UINT>(img.height));
   if (FAILED(hr)) {
-    *err = ErrorInfo{"SetSize failed", "SavePngWic", static_cast<uint32_t>(hr),
-                     std::nullopt};
-    return false;
+    return FailHr(err, "SetSize failed", "SavePngWic", hr);
   }
 
   WICPixelFormatGUID fmt = GUID_WICPixelFormat32bppBGRA;
   hr = frame->SetPixelFormat(&fmt);
   if (FAILED(hr)) {
-    *err = ErrorInfo{"SetPixelFormat failed", "SavePngWic",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
+    return FailHr(err, "SetPixelFormat failed", "SavePngWic", hr);
   }
 
   hr = frame->WritePixels(
       static_cast<UINT>(img.height), static_cast<UINT>(img.row_pitch),
       static_cast<UINT>(img.bgra.size()), const_cast<BYTE *>(img.bgra.data()));
   if (FAILED(hr)) {
-    *err = ErrorInfo{"WritePixels failed", "SavePngWic",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
+    return FailHr(err, "WritePixels failed", "SavePngWic", hr);
   }
 
   hr = frame->Commit();
   if (FAILED(hr)) {
-    *err = ErrorInfo{"Frame Commit failed", "SavePngWic",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
+    return FailHr(err, "Frame Commit failed", "SavePngWic", hr);
   }
 
   hr = encoder->Commit();
   if (FAILED(hr)) {
-    *err = ErrorInfo{"Encoder Commit failed", "SavePngWic",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
+    return FailHr(err, "Encoder Commit failed", "SavePngWic", hr);
   }
 
   return true;

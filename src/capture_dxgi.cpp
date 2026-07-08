@@ -1,9 +1,11 @@
 #include "capture.h"
+#include "d3d_readback.h"
 
 #include <d3d11.h>
 #include <dxgi1_2.h>
 
-#include <cstring>
+#include <algorithm>
+
 #include <wrl/client.h>
 
 namespace sc {
@@ -18,9 +20,8 @@ bool FindOutputForMonitor(HMONITOR hmon, IDXGIAdapter1 **out_adapter,
   ComPtr<IDXGIFactory1> factory;
   HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
   if (FAILED(hr)) {
-    *err = ErrorInfo{"CreateDXGIFactory1 failed", "FindOutputForMonitor",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
+    return FailHr(err, "CreateDXGIFactory1 failed", "FindOutputForMonitor",
+                  hr);
   }
 
   for (UINT ai = 0;; ++ai) {
@@ -39,10 +40,8 @@ bool FindOutputForMonitor(HMONITOR hmon, IDXGIAdapter1 **out_adapter,
         ComPtr<IDXGIOutput1> o1;
         hr = output.As(&o1);
         if (FAILED(hr)) {
-          *err = ErrorInfo{"QueryInterface IDXGIOutput1 failed",
-                           "FindOutputForMonitor", static_cast<uint32_t>(hr),
-                           std::nullopt};
-          return false;
+          return FailHr(err, "QueryInterface IDXGIOutput1 failed",
+                        "FindOutputForMonitor", hr);
         }
         *out_adapter = adapter.Detach();
         *out_output = o1.Detach();
@@ -53,9 +52,7 @@ bool FindOutputForMonitor(HMONITOR hmon, IDXGIAdapter1 **out_adapter,
     }
   }
 
-  *err = ErrorInfo{"monitor output not found", "FindOutputForMonitor",
-                   std::nullopt, std::nullopt};
-  return false;
+  return Fail(err, "monitor output not found", "FindOutputForMonitor");
 }
 
 bool AcquireDupFrame(IDXGIOutput1 *output1, IDXGIAdapter1 *adapter,
@@ -67,17 +64,13 @@ bool AcquireDupFrame(IDXGIOutput1 *output1, IDXGIAdapter1 *adapter,
                                  D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
                                  D3D11_SDK_VERSION, &device, nullptr, &context);
   if (FAILED(hr)) {
-    *err = ErrorInfo{"D3D11CreateDevice failed", "AcquireDupFrame",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
+    return FailHr(err, "D3D11CreateDevice failed", "AcquireDupFrame", hr);
   }
 
   ComPtr<IDXGIOutputDuplication> dup;
   hr = output1->DuplicateOutput(device.Get(), &dup);
   if (FAILED(hr)) {
-    *err = ErrorInfo{"DuplicateOutput failed", "AcquireDupFrame",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
+    return FailHr(err, "DuplicateOutput failed", "AcquireDupFrame", hr);
   }
 
   DXGI_OUTDUPL_FRAME_INFO frame_info{};
@@ -85,65 +78,36 @@ bool AcquireDupFrame(IDXGIOutput1 *output1, IDXGIAdapter1 *adapter,
   hr = dup->AcquireNextFrame(static_cast<UINT>(timeout_ms), &frame_info,
                              &resource);
   if (FAILED(hr)) {
-    *err = ErrorInfo{"AcquireNextFrame failed", "AcquireDupFrame",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
+    return FailHr(err, "AcquireNextFrame failed", "AcquireDupFrame", hr);
   }
 
   ComPtr<ID3D11Texture2D> tex;
   hr = resource.As(&tex);
   if (FAILED(hr)) {
     dup->ReleaseFrame();
-    *err = ErrorInfo{"frame resource to texture failed", "AcquireDupFrame",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
+    return FailHr(err, "frame resource to texture failed", "AcquireDupFrame",
+                  hr);
   }
 
   D3D11_TEXTURE2D_DESC desc{};
   tex->GetDesc(&desc);
-  desc.BindFlags = 0;
-  desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-  desc.MiscFlags = 0;
-  desc.Usage = D3D11_USAGE_STAGING;
 
-  ComPtr<ID3D11Texture2D> staging;
-  hr = device->CreateTexture2D(&desc, nullptr, &staging);
-  if (FAILED(hr)) {
-    dup->ReleaseFrame();
-    *err = ErrorInfo{"CreateTexture2D staging failed", "AcquireDupFrame",
-                     static_cast<uint32_t>(hr), std::nullopt};
+  // rcMonitor (logical coords) can disagree with the duplication surface's
+  // physical pixel dimensions under rotation or DPI virtualization, so clamp
+  // the requested read region to what the staging texture actually has.
+  const int read_w = std::min(Width(capture_rect), static_cast<int>(desc.Width));
+  const int read_h =
+      std::min(Height(capture_rect), static_cast<int>(desc.Height));
+
+  const bool ok = ReadTextureToImage(
+      device.Get(), context.Get(), tex.Get(), desc.Width, desc.Height, read_w,
+      read_h, /*copy_region=*/false, "AcquireDupFrame", out, err);
+  dup->ReleaseFrame();
+  if (!ok) {
     return false;
   }
-
-  context->CopyResource(staging.Get(), tex.Get());
-
-  D3D11_MAPPED_SUBRESOURCE map{};
-  hr = context->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &map);
-  if (FAILED(hr)) {
-    dup->ReleaseFrame();
-    *err = ErrorInfo{"Map staging failed", "AcquireDupFrame",
-                     static_cast<uint32_t>(hr), std::nullopt};
-    return false;
-  }
-
-  const int w = Width(capture_rect);
-  const int h = Height(capture_rect);
-  out->width = w;
-  out->height = h;
-  out->row_pitch = w * 4;
   out->origin_x = capture_rect.left;
   out->origin_y = capture_rect.top;
-  out->bgra.resize(static_cast<size_t>(w * h * 4));
-
-  for (int y = 0; y < h; ++y) {
-    const uint8_t *src = static_cast<const uint8_t *>(map.pData) +
-                         static_cast<size_t>(y * map.RowPitch);
-    uint8_t *dst = out->bgra.data() + static_cast<size_t>(y * out->row_pitch);
-    memcpy(dst, src, static_cast<size_t>(w * 4));
-  }
-
-  context->Unmap(staging.Get(), 0);
-  dup->ReleaseFrame();
   return true;
 }
 
@@ -159,9 +123,7 @@ bool CaptureWithDxgi(const CaptureContext &ctx, ImageBuffer *out,
     hmon = MonitorFromWindow(ctx.window->hwnd, MONITOR_DEFAULTTONEAREST);
   }
   if (!hmon) {
-    *err = ErrorInfo{"unable to resolve monitor for DXGI", "CaptureWithDxgi",
-                     std::nullopt, std::nullopt};
-    return false;
+    return Fail(err, "unable to resolve monitor for DXGI", "CaptureWithDxgi");
   }
 
   ComPtr<IDXGIAdapter1> adapter;
@@ -175,9 +137,7 @@ bool CaptureWithDxgi(const CaptureContext &ctx, ImageBuffer *out,
   MONITORINFO mi{};
   mi.cbSize = sizeof(mi);
   if (!GetMonitorInfoW(hmon, &mi)) {
-    *err = ErrorInfo{"GetMonitorInfo failed", "CaptureWithDxgi", std::nullopt,
-                     static_cast<uint32_t>(GetLastError())};
-    return false;
+    return FailWin32(err, "GetMonitorInfo failed", "CaptureWithDxgi");
   }
   Rect monitor_rect = ToRect(mi.rcMonitor);
 
@@ -191,11 +151,6 @@ bool CaptureWithDxgi(const CaptureContext &ctx, ImageBuffer *out,
   *out_adapter_index = ai;
   *out_output_index = oi;
 
-  if (ctx.cap.force_alpha_255) {
-    for (size_t i = 3; i < out->bgra.size(); i += 4) {
-      out->bgra[i] = 0xFF;
-    }
-  }
   return true;
 }
 

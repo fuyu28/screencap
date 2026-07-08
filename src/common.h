@@ -2,7 +2,9 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -57,6 +59,28 @@ struct ImageStats {
   double avg_luma = 0.0;
 };
 
+// Error helpers: fill *err and return false so failure paths stay one line.
+inline bool Fail(ErrorInfo *err, std::string message, std::string where) {
+  *err = ErrorInfo{std::move(message), std::move(where), std::nullopt,
+                   std::nullopt};
+  return false;
+}
+
+inline bool FailHr(ErrorInfo *err, std::string message, std::string where,
+                   HRESULT hr) {
+  *err = ErrorInfo{std::move(message), std::move(where),
+                   static_cast<uint32_t>(hr), std::nullopt};
+  return false;
+}
+
+// Captures GetLastError() immediately; call before any cleanup that could
+// clobber it.
+inline bool FailWin32(ErrorInfo *err, std::string message, std::string where) {
+  *err = ErrorInfo{std::move(message), std::move(where), std::nullopt,
+                   static_cast<uint32_t>(GetLastError())};
+  return false;
+}
+
 inline Rect ToRect(const RECT &r) {
   return Rect{r.left, r.top, r.right, r.bottom};
 }
@@ -75,6 +99,22 @@ inline std::string ToHex32(uint32_t v) {
   char buf[16] = {};
   snprintf(buf, sizeof(buf), "0x%08X", v);
   return std::string(buf);
+}
+
+inline std::string ToLowerAscii(std::string s) {
+  std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+    return static_cast<char>(tolower(c));
+  });
+  return s;
+}
+
+inline std::wstring GetWindowTextWString(HWND hwnd) {
+  int len = GetWindowTextLengthW(hwnd);
+  std::wstring out(static_cast<size_t>(len), L'\0');
+  if (len > 0) {
+    GetWindowTextW(hwnd, out.data(), len + 1);
+  }
+  return out;
 }
 
 inline std::string HwndToString(HWND hwnd) {

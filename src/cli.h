@@ -41,12 +41,10 @@ struct CapOptions {
   std::string method;
   TargetType target = TargetType::kWindow;
   std::string out_path;
-  std::string format = "png";
-  bool hotkey_enabled = false;
+  // Hotkey mode is enabled iff hotkey_spec is non-empty (validated at parse).
   std::string hotkey_spec;
   UINT hotkey_modifiers = 0;
   UINT hotkey_vk = 0;
-  bool hotkey_foreground = false;
   TargetWindowQuery window_query;
   TargetScreenQuery screen_query;
   CropMode crop_mode = CropMode::kNone;

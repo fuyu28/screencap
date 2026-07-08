@@ -3,21 +3,11 @@
 #include <dwmapi.h>
 
 #include <algorithm>
-#include <cctype>
 #include <tuple>
 
 namespace sc {
 
 namespace {
-
-std::string GetWindowTextUtf8(HWND hwnd) {
-  int len = GetWindowTextLengthW(hwnd);
-  std::wstring ws(static_cast<size_t>(len), L'\0');
-  if (len > 0) {
-    GetWindowTextW(hwnd, ws.data(), len + 1);
-  }
-  return Utf8FromWide(ws);
-}
 
 std::string GetClassNameUtf8(HWND hwnd) {
   wchar_t buf[256] = {};
@@ -53,13 +43,7 @@ int Area(const Rect &r) {
 bool ContainsI(const std::string &hay, const std::string &needle) {
   if (needle.empty())
     return true;
-  auto lower = [](std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
-      return static_cast<char>(tolower(c));
-    });
-    return s;
-  };
-  return lower(hay).find(lower(needle)) != std::string::npos;
+  return ToLowerAscii(hay).find(ToLowerAscii(needle)) != std::string::npos;
 }
 
 } // namespace
@@ -73,7 +57,7 @@ std::vector<WindowInfo> EnumerateWindows() {
         WindowInfo w;
         w.hwnd = hwnd;
         GetWindowThreadProcessId(hwnd, &w.pid);
-        w.title = GetWindowTextUtf8(hwnd);
+        w.title = Utf8FromWide(GetWindowTextWString(hwnd));
         w.class_name = GetClassNameUtf8(hwnd);
         RECT r{};
         GetWindowRect(hwnd, &r);

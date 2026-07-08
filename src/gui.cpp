@@ -34,6 +34,7 @@ struct GuiState {
   HWND capture = nullptr;
   HWND status = nullptr;
   std::vector<WindowInfo> windows;
+  bool capturing = false;
 };
 
 GuiState *GetState(HWND hwnd) {
@@ -65,16 +66,6 @@ std::wstring DefaultOutputPath() {
     return filename;
   }
   return (std::filesystem::path(cwd) / filename).wstring();
-}
-
-std::wstring GetWindowTextString(HWND hwnd) {
-  int len = GetWindowTextLengthW(hwnd);
-  std::wstring out(static_cast<size_t>(len + 1), L'\0');
-  if (len > 0) {
-    GetWindowTextW(hwnd, out.data(), len + 1);
-  }
-  out.resize(static_cast<size_t>(len));
-  return out;
 }
 
 void SetStatus(GuiState *s, const std::wstring &text) {
@@ -133,7 +124,11 @@ void RefreshWindows(GuiState *s) {
   ListView_DeleteAllItems(s->list);
 
   auto all = EnumerateWindows();
+  const DWORD self_pid = GetCurrentProcessId();
   for (auto &w : all) {
+    if (w.pid == self_pid) {
+      continue;
+    }
     if (IsPickableWindow(w)) {
       s->windows.push_back(std::move(w));
     }
@@ -172,14 +167,23 @@ void RefreshWindows(GuiState *s) {
 
 std::wstring QuoteArg(const std::wstring &s) {
   std::wstring out = L"\"";
+  size_t backslashes = 0;
   for (wchar_t ch : s) {
+    if (ch == L'\\') {
+      ++backslashes;
+      continue;
+    }
     if (ch == L'"') {
-      out += L"\\\"";
+      out.append(backslashes * 2 + 1, L'\\');
+      out += L'"';
     } else {
+      out.append(backslashes, L'\\');
       out += ch;
     }
+    backslashes = 0;
   }
-  out += L"\"";
+  out.append(backslashes * 2, L'\\');
+  out += L'"';
   return out;
 }
 
@@ -218,7 +222,7 @@ int SelectedWindowIndex(GuiState *s) {
 
 void BrowseOutput(GuiState *s) {
   wchar_t file[MAX_PATH] = {};
-  auto current = GetWindowTextString(s->out);
+  auto current = GetWindowTextWString(s->out);
   wcsncpy_s(file, current.c_str(), _TRUNCATE);
 
   OPENFILENAMEW ofn{};
@@ -261,11 +265,70 @@ bool RunCaptureProcess(const WindowInfo &w, const std::wstring &method,
     return false;
   }
 
-  WaitForSingleObject(pi.hProcess, INFINITE);
+  constexpr DWORD kCaptureTimeoutMs = 30000;
+  const ULONGLONG deadline = GetTickCount64() + kCaptureTimeoutMs;
+  bool quit_pending = false;
+  WPARAM quit_wparam = 0;
+  bool timed_out = false;
+  bool wait_failed = false;
+  DWORD wait_error = 0;
+
+  for (;;) {
+    const ULONGLONG now = GetTickCount64();
+    const DWORD remaining =
+        (now >= deadline) ? 0 : static_cast<DWORD>(deadline - now);
+    const DWORD wait = MsgWaitForMultipleObjects(1, &pi.hProcess, FALSE,
+                                                 remaining, QS_ALLINPUT);
+    if (wait == WAIT_OBJECT_0) {
+      break;
+    }
+    if (wait == WAIT_OBJECT_0 + 1) {
+      MSG msg;
+      while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        if (msg.message == WM_QUIT) {
+          quit_pending = true;
+          quit_wparam = msg.wParam;
+          continue;
+        }
+        if (quit_pending) {
+          continue;
+        }
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+      }
+      continue;
+    }
+    if (wait == WAIT_TIMEOUT) {
+      timed_out = true;
+      break;
+    }
+    wait_failed = true;
+    wait_error = GetLastError();
+    break;
+  }
+
+  if (timed_out || wait_failed) {
+    TerminateProcess(pi.hProcess, 1);
+    WaitForSingleObject(pi.hProcess, 5000);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    if (quit_pending) {
+      PostQuitMessage(static_cast<int>(quit_wparam));
+    }
+    *error = wait_failed
+                 ? (L"Wait for capture process failed: " +
+                    std::to_wstring(wait_error))
+                 : std::wstring(L"Capture timed out.");
+    return false;
+  }
+
   DWORD exit_code = 1;
   GetExitCodeProcess(pi.hProcess, &exit_code);
   CloseHandle(pi.hThread);
   CloseHandle(pi.hProcess);
+  if (quit_pending) {
+    PostQuitMessage(static_cast<int>(quit_wparam));
+  }
   if (exit_code != 0) {
     *error = L"Capture failed. Exit code: " + std::to_wstring(exit_code);
     return false;
@@ -274,6 +337,10 @@ bool RunCaptureProcess(const WindowInfo &w, const std::wstring &method,
 }
 
 void CaptureSelected(GuiState *s) {
+  if (s->capturing) {
+    return;
+  }
+
   int idx = SelectedWindowIndex(s);
   if (idx < 0 || idx >= static_cast<int>(s->windows.size())) {
     MessageBoxW(s->hwnd, L"Select a window first.", L"screencap",
@@ -281,13 +348,14 @@ void CaptureSelected(GuiState *s) {
     return;
   }
 
-  auto out_path = GetWindowTextString(s->out);
+  auto out_path = GetWindowTextWString(s->out);
   if (out_path.empty()) {
     MessageBoxW(s->hwnd, L"Choose an output path first.", L"screencap",
                 MB_ICONINFORMATION);
     return;
   }
 
+  s->capturing = true;
   EnableWindow(s->capture, FALSE);
   SetStatus(s, L"Capturing...");
   UpdateWindow(s->hwnd);
@@ -299,10 +367,16 @@ void CaptureSelected(GuiState *s) {
   if (!ok) {
     SetStatus(s, err);
     MessageBoxW(s->hwnd, err.c_str(), L"screencap", MB_ICONERROR);
+    s->capturing = false;
     return;
   }
 
   SetStatus(s, L"Saved: " + out_path);
+  std::filesystem::path p(out_path);
+  p.replace_filename(L"screenshot_" + WideFromUtf8(BuildTimestampForFilename()) +
+                     L".png");
+  SetWindowTextW(s->out, p.c_str());
+  s->capturing = false;
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
@@ -310,7 +384,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
     auto *cs = reinterpret_cast<CREATESTRUCTW *>(lparam);
     SetWindowLongPtrW(hwnd, GWLP_USERDATA,
                       reinterpret_cast<LONG_PTR>(cs->lpCreateParams));
-    return TRUE;
+    return DefWindowProcW(hwnd, msg, wparam, lparam);
   }
 
   GuiState *s = GetState(hwnd);

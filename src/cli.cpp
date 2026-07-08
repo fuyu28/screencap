@@ -1,7 +1,5 @@
 #include "cli.h"
 
-#include <algorithm>
-#include <cctype>
 #include <cstdlib>
 #include <sstream>
 
@@ -20,7 +18,7 @@ bool NeedValue(int i, int argc, const std::string &name, std::string *err) {
 bool ParseInt(const std::string &s, int *out) {
   char *end = nullptr;
   long v = strtol(s.c_str(), &end, 10);
-  if (!end || *end != '\0')
+  if (!end || end == s.c_str() || *end != '\0')
     return false;
   *out = static_cast<int>(v);
   return true;
@@ -29,7 +27,7 @@ bool ParseInt(const std::string &s, int *out) {
 bool ParseU64(const std::string &s, uint64_t *out) {
   char *end = nullptr;
   unsigned long long v = strtoull(s.c_str(), &end, 10);
-  if (!end || *end != '\0')
+  if (!end || end == s.c_str() || *end != '\0')
     return false;
   *out = static_cast<uint64_t>(v);
   return true;
@@ -53,14 +51,6 @@ CropMode ParseCropMode(const std::string &s) {
   if (s == "manual")
     return CropMode::kManual;
   return CropMode::kNone;
-}
-
-std::string ToLowerAscii(const std::string &s) {
-  std::string out = s;
-  std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) {
-    return static_cast<char>(tolower(c));
-  });
-  return out;
 }
 
 bool ParseFunctionKey(const std::string &token, UINT *vk) {
@@ -181,6 +171,9 @@ ParseResult ParseArgs(int argc, char **argv) {
     return r;
   }
 
+  std::string format = "png";
+  bool hotkey_foreground = false;
+
   while (i < argc) {
     std::string a = argv[i];
 
@@ -197,14 +190,17 @@ ParseResult ParseArgs(int argc, char **argv) {
     } else if (a == "--timeout-ms") {
       if (!NeedValue(i, argc, a, &r.error))
         return r;
-      if (!ParseInt(argv[++i], &out.common.timeout_ms)) {
+      // Negative values would become INFINITE via the DWORD/UINT casts at the
+      // WaitForSingleObject / AcquireNextFrame call sites.
+      if (!ParseInt(argv[++i], &out.common.timeout_ms) ||
+          out.common.timeout_ms < 0) {
         r.error = "invalid --timeout-ms";
         return r;
       }
     } else if (a == "--retry") {
       if (!NeedValue(i, argc, a, &r.error))
         return r;
-      if (!ParseInt(argv[++i], &out.common.retry)) {
+      if (!ParseInt(argv[++i], &out.common.retry) || out.common.retry < 0) {
         r.error = "invalid --retry";
         return r;
       }
@@ -302,7 +298,7 @@ ParseResult ParseArgs(int argc, char **argv) {
     } else if (out.command == CommandType::kCap && a == "--format") {
       if (!NeedValue(i, argc, a, &r.error))
         return r;
-      out.cap.format = argv[++i];
+      format = argv[++i];
     } else if (out.command == CommandType::kCap && a == "--force-alpha") {
       if (!NeedValue(i, argc, a, &r.error))
         return r;
@@ -321,10 +317,9 @@ ParseResult ParseArgs(int argc, char **argv) {
         r.error = "invalid --hotkey (ex: ctrl+shift+s, alt+f9)";
         return r;
       }
-      out.cap.hotkey_enabled = true;
     } else if (out.command == CommandType::kCap &&
                a == "--hotkey-foreground") {
-      out.cap.hotkey_foreground = true;
+      hotkey_foreground = true;
       out.cap.window_query.foreground = true;
     } else {
       r.error = "unknown option: " + a;
@@ -342,7 +337,7 @@ ParseResult ParseArgs(int argc, char **argv) {
       r.error = "cap needs --out";
       return r;
     }
-    if (out.cap.format != "png") {
+    if (format != "png") {
       r.error = "only --format png is supported";
       return r;
     }
@@ -370,7 +365,7 @@ ParseResult ParseArgs(int argc, char **argv) {
       r.error = "manual crop needs --crop-rect";
       return r;
     }
-    if (out.cap.hotkey_foreground && !out.cap.hotkey_enabled) {
+    if (hotkey_foreground && out.cap.hotkey_spec.empty()) {
       r.error = "--hotkey-foreground needs --hotkey";
       return r;
     }

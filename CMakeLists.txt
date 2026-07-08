@@ -16,6 +16,7 @@ set(SCREENCAP_CORE_SOURCES
   src/capture_gdi.cpp
   src/capture_dxgi.cpp
   src/capture_wgc.cpp
+  src/d3d_readback.cpp
   src/util.cpp
 )
 

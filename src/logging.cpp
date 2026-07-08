@@ -17,12 +17,6 @@ bool IsEnabled(LogLevel min_level, LogLevel lv) {
   return static_cast<int>(lv) >= static_cast<int>(min_level);
 }
 
-std::string BaseNameNoExt(const std::string &c) {
-  if (c.empty())
-    return "unknown";
-  return c;
-}
-
 } // namespace
 
 bool Logger::Init(const std::string &log_dir_utf8,
@@ -35,11 +29,11 @@ bool Logger::Init(const std::string &log_dir_utf8,
     return false;
   }
 
-  const auto filename = BuildTimestampForFilename() + "_" +
-                        std::to_string(GetCurrentProcessId()) + "_" +
-                        BaseNameNoExt(command_name) + ".log";
-  file_path_ = dir / WideFromUtf8(filename);
-  out_.open(file_path_, std::ios::out | std::ios::binary);
+  const auto filename =
+      BuildTimestampForFilename() + "_" +
+      std::to_string(GetCurrentProcessId()) + "_" +
+      (command_name.empty() ? "unknown" : command_name) + ".log";
+  out_.open(dir / WideFromUtf8(filename), std::ios::out | std::ios::binary);
   return out_.good();
 }
 

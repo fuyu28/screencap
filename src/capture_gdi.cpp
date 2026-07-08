@@ -1,18 +1,21 @@
 #include "capture.h"
 
 #include <cstring>
+#include <functional>
 
 namespace sc {
 
 namespace {
 
-bool CaptureFromDc(HDC src_dc, int src_x, int src_y, int w, int h, int origin_x,
-                   int origin_y, ImageBuffer *out, ErrorInfo *err) {
-  HDC mem_dc = CreateCompatibleDC(src_dc);
+// Shared DC/DIB scaffolding for all GDI capture variants: creates a 32bpp
+// top-down DIB of w x h, runs `blit` to fill it, then copies the pixels into
+// `out`. `blit` reports its own error and returns false on failure.
+bool CaptureViaDib(HDC ref_dc, int w, int h, int origin_x, int origin_y,
+                   const std::function<bool(HDC mem_dc, ErrorInfo *)> &blit,
+                   ImageBuffer *out, ErrorInfo *err) {
+  HDC mem_dc = CreateCompatibleDC(ref_dc);
   if (!mem_dc) {
-    *err = ErrorInfo{"CreateCompatibleDC failed", "CaptureFromDc", std::nullopt,
-                     static_cast<uint32_t>(GetLastError())};
-    return false;
+    return FailWin32(err, "CreateCompatibleDC failed", "CaptureViaDib");
   }
 
   BITMAPINFO bmi{};
@@ -27,123 +30,85 @@ bool CaptureFromDc(HDC src_dc, int src_x, int src_y, int w, int h, int origin_x,
   HBITMAP bmp =
       CreateDIBSection(mem_dc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
   if (!bmp || !bits) {
+    FailWin32(err, "CreateDIBSection failed", "CaptureViaDib");
+    if (bmp)
+      DeleteObject(bmp);
     DeleteDC(mem_dc);
-    *err = ErrorInfo{"CreateDIBSection failed", "CaptureFromDc", std::nullopt,
-                     static_cast<uint32_t>(GetLastError())};
     return false;
   }
 
   HGDIOBJ old = SelectObject(mem_dc, bmp);
-  BOOL ok =
-      BitBlt(mem_dc, 0, 0, w, h, src_dc, src_x, src_y, SRCCOPY | CAPTUREBLT);
-  if (!ok) {
-    SelectObject(mem_dc, old);
-    DeleteObject(bmp);
-    DeleteDC(mem_dc);
-    *err = ErrorInfo{"BitBlt failed", "CaptureFromDc", std::nullopt,
-                     static_cast<uint32_t>(GetLastError())};
-    return false;
+  const bool ok = blit(mem_dc, err);
+  if (ok) {
+    out->width = w;
+    out->height = h;
+    out->row_pitch = w * 4;
+    out->origin_x = origin_x;
+    out->origin_y = origin_y;
+    out->bgra.assign(static_cast<uint8_t *>(bits),
+                     static_cast<uint8_t *>(bits) +
+                         static_cast<size_t>(out->row_pitch * h));
   }
-
-  out->width = w;
-  out->height = h;
-  out->row_pitch = w * 4;
-  out->origin_x = origin_x;
-  out->origin_y = origin_y;
-  out->bgra.assign(static_cast<uint8_t *>(bits),
-                   static_cast<uint8_t *>(bits) +
-                       static_cast<size_t>(out->row_pitch * h));
 
   SelectObject(mem_dc, old);
   DeleteObject(bmp);
   DeleteDC(mem_dc);
-  return true;
+  return ok;
+}
+
+bool CaptureFromDc(HDC src_dc, int src_x, int src_y, int w, int h, int origin_x,
+                   int origin_y, ImageBuffer *out, ErrorInfo *err) {
+  return CaptureViaDib(
+      src_dc, w, h, origin_x, origin_y,
+      [&](HDC mem_dc, ErrorInfo *e) {
+        if (!BitBlt(mem_dc, 0, 0, w, h, src_dc, src_x, src_y,
+                    SRCCOPY | CAPTUREBLT)) {
+          return FailWin32(e, "BitBlt failed", "CaptureFromDc");
+        }
+        return true;
+      },
+      out, err);
 }
 
 } // namespace
 
 bool CaptureWithGdi(const CaptureContext &ctx, ImageBuffer *out,
                     ErrorInfo *err) {
-  const auto &method = ctx.method;
+  const auto &method = ctx.cap.method;
 
   if (method == "gdi-printwindow") {
     if (!ctx.window.has_value()) {
-      *err = ErrorInfo{"gdi-printwindow requires window target",
-                       "CaptureWithGdi", std::nullopt, std::nullopt};
-      return false;
+      return Fail(err, "gdi-printwindow requires window target",
+                  "CaptureWithGdi");
     }
     const auto &w = ctx.window.value();
-    int width = Width(w.rect);
-    int height = Height(w.rect);
 
     HDC win_dc = GetWindowDC(w.hwnd);
     if (!win_dc) {
-      *err = ErrorInfo{"GetWindowDC failed", "CaptureWithGdi", std::nullopt,
-                       static_cast<uint32_t>(GetLastError())};
-      return false;
+      return FailWin32(err, "GetWindowDC failed", "CaptureWithGdi");
     }
-    HDC mem_dc = CreateCompatibleDC(win_dc);
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = width;
-    bmi.bmiHeader.biHeight = -height;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    void *bits = nullptr;
-    HBITMAP bmp =
-        CreateDIBSection(mem_dc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
-    if (!bmp || !bits) {
-      if (bmp)
-        DeleteObject(bmp);
-      DeleteDC(mem_dc);
-      ReleaseDC(w.hwnd, win_dc);
-      *err = ErrorInfo{"CreateDIBSection failed", "CaptureWithGdi",
-                       std::nullopt, static_cast<uint32_t>(GetLastError())};
-      return false;
-    }
-
-    HGDIOBJ old = SelectObject(mem_dc, bmp);
-    BOOL ok = PrintWindow(w.hwnd, mem_dc, PW_RENDERFULLCONTENT);
-    if (!ok) {
-      *err = ErrorInfo{"PrintWindow failed", "CaptureWithGdi", std::nullopt,
-                       static_cast<uint32_t>(GetLastError())};
-      SelectObject(mem_dc, old);
-      DeleteObject(bmp);
-      DeleteDC(mem_dc);
-      ReleaseDC(w.hwnd, win_dc);
-      return false;
-    }
-
-    out->width = width;
-    out->height = height;
-    out->row_pitch = width * 4;
-    out->origin_x = w.rect.left;
-    out->origin_y = w.rect.top;
-    out->bgra.assign(static_cast<uint8_t *>(bits),
-                     static_cast<uint8_t *>(bits) +
-                         static_cast<size_t>(out->row_pitch * height));
-
-    SelectObject(mem_dc, old);
-    DeleteObject(bmp);
-    DeleteDC(mem_dc);
+    bool ok = CaptureViaDib(
+        win_dc, Width(w.rect), Height(w.rect), w.rect.left, w.rect.top,
+        [&](HDC mem_dc, ErrorInfo *e) {
+          if (!PrintWindow(w.hwnd, mem_dc, PW_RENDERFULLCONTENT)) {
+            return FailWin32(e, "PrintWindow failed", "CaptureWithGdi");
+          }
+          return true;
+        },
+        out, err);
     ReleaseDC(w.hwnd, win_dc);
-    return true;
+    return ok;
   }
 
   if (method == "gdi-bitblt-client") {
     if (!ctx.window.has_value()) {
-      *err = ErrorInfo{"gdi-bitblt-client requires window target",
-                       "CaptureWithGdi", std::nullopt, std::nullopt};
-      return false;
+      return Fail(err, "gdi-bitblt-client requires window target",
+                  "CaptureWithGdi");
     }
     const auto &w = ctx.window.value();
     HDC src = GetDC(w.hwnd);
     if (!src) {
-      *err = ErrorInfo{"GetDC(hwnd) failed", "CaptureWithGdi", std::nullopt,
-                       static_cast<uint32_t>(GetLastError())};
-      return false;
+      return FailWin32(err, "GetDC(hwnd) failed", "CaptureWithGdi");
     }
     int ww = Width(w.client_rect_screen);
     int hh = Height(w.client_rect_screen);
@@ -155,16 +120,13 @@ bool CaptureWithGdi(const CaptureContext &ctx, ImageBuffer *out,
 
   if (method == "gdi-bitblt-windowdc") {
     if (!ctx.window.has_value()) {
-      *err = ErrorInfo{"gdi-bitblt-windowdc requires window target",
-                       "CaptureWithGdi", std::nullopt, std::nullopt};
-      return false;
+      return Fail(err, "gdi-bitblt-windowdc requires window target",
+                  "CaptureWithGdi");
     }
     const auto &w = ctx.window.value();
     HDC src = GetWindowDC(w.hwnd);
     if (!src) {
-      *err = ErrorInfo{"GetWindowDC failed", "CaptureWithGdi", std::nullopt,
-                       static_cast<uint32_t>(GetLastError())};
-      return false;
+      return FailWin32(err, "GetWindowDC failed", "CaptureWithGdi");
     }
     int ww = Width(w.rect);
     int hh = Height(w.rect);
@@ -177,9 +139,7 @@ bool CaptureWithGdi(const CaptureContext &ctx, ImageBuffer *out,
   if (method == "gdi-bitblt-screen") {
     HDC src = GetDC(nullptr);
     if (!src) {
-      *err = ErrorInfo{"GetDC(NULL) failed", "CaptureWithGdi", std::nullopt,
-                       static_cast<uint32_t>(GetLastError())};
-      return false;
+      return FailWin32(err, "GetDC(NULL) failed", "CaptureWithGdi");
     }
 
     Rect r = ctx.capture_rect_screen;
@@ -191,9 +151,7 @@ bool CaptureWithGdi(const CaptureContext &ctx, ImageBuffer *out,
     return ok;
   }
 
-  *err = ErrorInfo{"unknown gdi method", "CaptureWithGdi", std::nullopt,
-                   std::nullopt};
-  return false;
+  return Fail(err, "unknown gdi method", "CaptureWithGdi");
 }
 
 } // namespace sc

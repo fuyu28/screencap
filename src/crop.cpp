@@ -88,6 +88,12 @@ bool CropImageInPlace(const Rect &crop_screen_rect, ImageBuffer *img,
   const int nw = Width(c);
   const int nh = Height(c);
 
+  // Crop covers the whole image (common when crop mode is none): nothing to do.
+  if (x0 == 0 && y0 == 0 && nw == img->width && nh == img->height &&
+      img->row_pitch == nw * 4) {
+    return true;
+  }
+
   std::vector<uint8_t> out(static_cast<size_t>(nw * nh * 4));
   for (int y = 0; y < nh; ++y) {
     const uint8_t *src =

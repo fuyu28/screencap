@@ -10,7 +10,6 @@ namespace sc {
 class Logger;
 
 struct CaptureContext {
-  std::string method;
   CapOptions cap;
   CommonOptions common;
   std::optional<WindowInfo> window;

@@ -109,20 +109,43 @@ std::string ErrorJson(const ErrorInfo &err) {
   return oss.str();
 }
 
+// include_client_rect keeps the historical difference between the `cap`
+// result (has client_rect_screen) and `list windows` (does not).
+std::string WindowJson(const WindowInfo &w, bool include_client_rect) {
+  std::ostringstream oss;
+  oss << "{\"hwnd\":" << reinterpret_cast<uintptr_t>(w.hwnd)
+      << ",\"pid\":" << w.pid << ",\"title\":\"" << JsonEscape(w.title)
+      << "\",\"class\":\"" << JsonEscape(w.class_name)
+      << "\",\"rect\":" << RectJson(w.rect);
+  if (include_client_rect) {
+    oss << ",\"client_rect_screen\":" << RectJson(w.client_rect_screen);
+  }
+  oss << ",\"visible\":" << (w.visible ? "true" : "false")
+      << ",\"iconic\":" << (w.iconic ? "true" : "false")
+      << ",\"cloaked\":" << (w.cloaked ? "true" : "false") << '}';
+  return oss.str();
+}
+
+// include_name keeps the historical difference between `list monitors`
+// (has name) and the `cap` result (does not).
+std::string MonitorJson(const MonitorInfo &m, bool include_name) {
+  std::ostringstream oss;
+  oss << "{\"index\":" << m.index;
+  if (include_name) {
+    oss << ",\"name\":\"" << JsonEscape(m.name) << "\"";
+  }
+  oss << ",\"desktop\":" << RectJson(m.desktop)
+      << ",\"primary\":" << (m.primary ? "true" : "false") << '}';
+  return oss.str();
+}
+
 std::string WindowsJsonArray(const std::vector<WindowInfo> &ws) {
   std::ostringstream oss;
   oss << '[';
   for (size_t i = 0; i < ws.size(); ++i) {
-    const auto &w = ws[i];
     if (i)
       oss << ',';
-    oss << "{\"hwnd\":" << reinterpret_cast<uintptr_t>(w.hwnd)
-        << ",\"pid\":" << w.pid << ",\"title\":\"" << JsonEscape(w.title)
-        << "\",\"class\":\"" << JsonEscape(w.class_name)
-        << "\",\"rect\":" << RectJson(w.rect)
-        << ",\"visible\":" << (w.visible ? "true" : "false")
-        << ",\"iconic\":" << (w.iconic ? "true" : "false")
-        << ",\"cloaked\":" << (w.cloaked ? "true" : "false") << '}';
+    oss << WindowJson(ws[i], /*include_client_rect=*/false);
   }
   oss << ']';
   return oss.str();
@@ -132,12 +155,9 @@ std::string MonitorsJsonArray(const std::vector<MonitorInfo> &ms) {
   std::ostringstream oss;
   oss << '[';
   for (size_t i = 0; i < ms.size(); ++i) {
-    const auto &m = ms[i];
     if (i)
       oss << ',';
-    oss << "{\"index\":" << m.index << ",\"name\":\"" << JsonEscape(m.name)
-        << "\",\"desktop\":" << RectJson(m.desktop)
-        << ",\"primary\":" << (m.primary ? "true" : "false") << '}';
+    oss << MonitorJson(ms[i], /*include_name=*/true);
   }
   oss << ']';
   return oss.str();
@@ -209,17 +229,12 @@ RunResult RunCap(const ParsedArgs &parsed, Logger *logger,
   auto monitors = EnumerateMonitors();
 
   CaptureContext ctx;
-  ctx.method = parsed.cap.method;
   ctx.cap = parsed.cap;
   ctx.common = parsed.common;
   ctx.logger = logger;
 
   std::string resolve_reason;
-  if (parsed.cap.target == TargetType::kWindow ||
-      parsed.cap.method.find("window") != std::string::npos ||
-      parsed.cap.method.find("printwindow") != std::string::npos ||
-      parsed.cap.method.find("client") != std::string::npos ||
-      parsed.cap.method.find("windowdc") != std::string::npos) {
+  if (parsed.cap.target == TargetType::kWindow) {
     WindowInfo w;
     ErrorInfo err;
     if (!ResolveWindowTarget(parsed.cap.window_query, windows, &w,
@@ -351,6 +366,15 @@ RunResult RunCap(const ParsedArgs &parsed, Logger *logger,
     return rr;
   }
 
+  // Normalize alpha here (not per-backend) so it applies uniformly to GDI,
+  // DXGI, and WGC captures, and so transparent_ratio below reflects the
+  // saved image.
+  if (parsed.cap.force_alpha_255) {
+    for (size_t i = 3; i < img.bgra.size(); i += 4) {
+      img.bgra[i] = 0xFF;
+    }
+  }
+
   ImageStats stats = ComputeImageStats(img);
   if (logger) {
     logger->Log(
@@ -384,22 +408,13 @@ RunResult RunCap(const ParsedArgs &parsed, Logger *logger,
      << JsonEscape(dpi_applied) << "\"";
 
   if (ctx.window.has_value()) {
-    const auto &w = ctx.window.value();
-    js << ",\"window\":{\"hwnd\":" << reinterpret_cast<uintptr_t>(w.hwnd)
-       << ",\"pid\":" << w.pid << ",\"title\":\"" << JsonEscape(w.title)
-       << "\",\"class\":\"" << JsonEscape(w.class_name)
-       << "\",\"rect\":" << RectJson(w.rect)
-       << ",\"client_rect_screen\":" << RectJson(w.client_rect_screen)
-       << ",\"visible\":" << (w.visible ? "true" : "false")
-       << ",\"iconic\":" << (w.iconic ? "true" : "false")
-       << ",\"cloaked\":" << (w.cloaked ? "true" : "false") << '}';
+    js << ",\"window\":"
+       << WindowJson(ctx.window.value(), /*include_client_rect=*/true);
   }
 
   if (ctx.monitor.has_value()) {
-    const auto &m = ctx.monitor.value();
-    js << ",\"monitor\":{\"index\":" << m.index
-       << ",\"desktop\":" << RectJson(m.desktop)
-       << ",\"primary\":" << (m.primary ? "true" : "false") << '}';
+    js << ",\"monitor\":"
+       << MonitorJson(ctx.monitor.value(), /*include_name=*/false);
   }
 
   js << ",\"crop\":{\"mode\":\"" << CropModeName(crop_mode)
@@ -461,7 +476,7 @@ std::string BuildFailureJson(const std::string &command,
 }
 
 bool WaitForHotkey(const ParsedArgs &parsed, Logger *logger, ErrorInfo *err) {
-  if (!parsed.cap.hotkey_enabled) {
+  if (parsed.cap.hotkey_spec.empty()) {
     return true;
   }
 
@@ -511,7 +526,7 @@ bool WaitForHotkey(const ParsedArgs &parsed, Logger *logger, ErrorInfo *err) {
 
 } // namespace sc
 
-int main(int argc, char **argv) {
+static int RunMain(int argc, char **argv) {
   using namespace sc;
 
   auto boot = PreParseBootstrap(argc, argv);
@@ -544,23 +559,18 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  ParsedArgs run_args = parsed.args;
   RunResult rr;
   if (parsed.args.command == CommandType::kListWindows) {
     rr = RunListWindows(parsed.args);
   } else if (parsed.args.command == CommandType::kListMonitors) {
     rr = RunListMonitors(parsed.args);
   } else {
-    if (run_args.cap.hotkey_enabled) {
-      ErrorInfo wait_err;
-      if (!WaitForHotkey(run_args, &logger, &wait_err)) {
-        rr.err = wait_err;
-        rr.exit_code = 1;
-      } else {
-        rr = RunCap(run_args, &logger, dpi_applied);
-      }
+    ErrorInfo wait_err;
+    if (!WaitForHotkey(parsed.args, &logger, &wait_err)) {
+      rr.err = wait_err;
+      rr.exit_code = 1;
     } else {
-      rr = RunCap(run_args, &logger, dpi_applied);
+      rr = RunCap(parsed.args, &logger, dpi_applied);
     }
   }
 
@@ -587,4 +597,19 @@ int main(int argc, char **argv) {
     std::cerr << "Error: " << rr.err.message << " (" << rr.err.where << ")\n";
   }
   return rr.exit_code;
+}
+
+int wmain(int argc, wchar_t **argv) {
+  std::vector<std::string> utf8_args;
+  utf8_args.reserve(static_cast<size_t>(argc));
+  for (int i = 0; i < argc; ++i) {
+    utf8_args.push_back(sc::Utf8FromWide(argv[i]));
+  }
+  std::vector<char *> utf8_ptrs;
+  utf8_ptrs.reserve(static_cast<size_t>(argc) + 1);
+  for (auto &s : utf8_args) {
+    utf8_ptrs.push_back(s.data());
+  }
+  utf8_ptrs.push_back(nullptr);
+  return RunMain(argc, utf8_ptrs.data());
 }

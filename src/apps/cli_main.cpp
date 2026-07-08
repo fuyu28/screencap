@@ -1,11 +1,11 @@
-#include "capture.h"
-#include "cli.h"
-#include "crop.h"
-#include "encode_wic_png.h"
-#include "image_stats.h"
-#include "logging.h"
-#include "monitor_enum.h"
-#include "window_enum.h"
+#include "capture/capture.h"
+#include "cli/cli.h"
+#include "common/logging.h"
+#include "image/crop.h"
+#include "image/encode_wic_png.h"
+#include "image/image_stats.h"
+#include "winsys/monitor_enum.h"
+#include "winsys/window_enum.h"
 
 #include <shellscalingapi.h>
 

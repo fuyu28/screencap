@@ -1,5 +1,5 @@
-#include "capture.h"
-#include "d3d_readback.h"
+#include "capture/capture.h"
+#include "capture/d3d_readback.h"
 
 #include <d3d11.h>
 #include <dxgi1_2.h>

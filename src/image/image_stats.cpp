@@ -1,4 +1,4 @@
-#include "image_stats.h"
+#include "image/image_stats.h"
 
 namespace sc {
 

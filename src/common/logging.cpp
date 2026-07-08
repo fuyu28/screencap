@@ -1,4 +1,4 @@
-#include "logging.h"
+#include "common/logging.h"
 
 #include <windows.h>
 #include <winternl.h>

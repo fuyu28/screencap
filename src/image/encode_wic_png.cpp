@@ -1,4 +1,4 @@
-#include "encode_wic_png.h"
+#include "image/encode_wic_png.h"
 
 #include <wincodec.h>
 

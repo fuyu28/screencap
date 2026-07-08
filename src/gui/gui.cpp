@@ -1,7 +1,7 @@
-#include "gui.h"
+#include "gui/gui.h"
 
-#include "common.h"
-#include "window_enum.h"
+#include "common/common.h"
+#include "winsys/window_enum.h"
 
 #include <commctrl.h>
 #include <commdlg.h>

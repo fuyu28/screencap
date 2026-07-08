@@ -1,8 +1,8 @@
 #pragma once
 
-#include "cli.h"
-#include "common.h"
-#include "logging.h"
+#include "cli/cli.h"
+#include "common/common.h"
+#include "common/logging.h"
 
 #include <string>
 #include <vector>

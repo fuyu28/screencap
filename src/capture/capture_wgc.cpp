@@ -1,7 +1,7 @@
-#include "capture.h"
-#include "d3d_readback.h"
-#include "image_stats.h"
-#include "logging.h"
+#include "capture/capture.h"
+#include "capture/d3d_readback.h"
+#include "common/logging.h"
+#include "image/image_stats.h"
 
 #include <d3d11.h>
 #include <dxgi1_2.h>

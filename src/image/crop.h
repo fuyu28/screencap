@@ -1,8 +1,8 @@
 #pragma once
 
-#include "cli.h"
-#include "common.h"
-#include "window_enum.h"
+#include "cli/cli.h"
+#include "common/common.h"
+#include "winsys/window_enum.h"
 
 namespace sc {
 
